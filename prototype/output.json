@@ -1,0 +1,83 @@
+[
+  {
+    "tag": "input",
+    "type": "text",
+    "id": null,
+    "name": "username",
+    "own_text": "",
+    "inferred_label": "Username",
+    "label_score": 3.6,
+    "label_direction": "above",
+    "top_candidates": [
+      {
+        "text": "Username",
+        "score": 3.6,
+        "direction": "above"
+      },
+      {
+        "text": "Customer Login",
+        "score": 34.8,
+        "direction": "above"
+      },
+      {
+        "text": "Password",
+        "score": 36.0,
+        "direction": "below"
+      }
+    ]
+  },
+  {
+    "tag": "input",
+    "type": "password",
+    "id": null,
+    "name": "password",
+    "own_text": "",
+    "inferred_label": "Password",
+    "label_score": 3.6,
+    "label_direction": "above",
+    "top_candidates": [
+      {
+        "text": "Password",
+        "score": 3.6,
+        "direction": "above"
+      },
+      {
+        "text": "Username",
+        "score": 61.2,
+        "direction": "above"
+      },
+      {
+        "text": "Customer Login",
+        "score": 92.4,
+        "direction": "above"
+      }
+    ]
+  },
+  {
+    "tag": "input",
+    "type": "submit",
+    "id": null,
+    "name": null,
+    "own_text": "Log In",
+    "inferred_label": "Log In",
+    "label_score": 0.0,
+    "label_direction": "own_text",
+    "top_candidates": [
+      {
+        "text": "Log In",
+        "score": 0.0,
+        "direction": "own_text"
+      },
+      {
+        "text": "Forgot login info?",
+        "score": 36.0,
+        "direction": "below"
+      },
+      {
+        "text": "Password",
+        "score": 38.5,
+        "direction": "above"
+      }
+    ]
+  }
+]
