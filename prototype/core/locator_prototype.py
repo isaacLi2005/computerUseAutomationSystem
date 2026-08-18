@@ -13,15 +13,27 @@ at real pixel positions (Gestalt law of proximity) — that's the only signal a 
 operator is guaranteed to have, regardless of markup quality. DOM structure is an
 implementation choice a legacy app may not have made cleanly; geometry isn't.
 
-Run: .venv/bin/python locator_prototype.py
+Frame-aware: a page's visible content can be split across several separate
+documents (classic <frameset>/<frame>, or <iframe>) with no single DOM tree
+spanning all of it. We run the same extraction inside every attached frame and
+translate each frame's local rects into top-page coordinates using that frame's
+own bounding box (Playwright/CDP already composites this correctly across
+nesting depth -- verified empirically against a doubly-nested iframe, so no
+manual recursive offset math is needed). Matching (score_candidate) is entirely
+unaware that frames exist -- it just sees already-consistent global rects.
+
+Run (from prototype/): .venv/bin/python core/locator_prototype.py [URL] [output_filename]
 """
 
 import json
-from dataclasses import dataclass, asdict
+import sys
+from dataclasses import dataclass
+from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-TARGET_URL = "https://parabank.parasoft.com/parabank/index.htm"
+DEFAULT_TARGET_URL = "https://parabank.parasoft.com/parabank/index.htm"
+DATA_DIR = Path(__file__).parent.parent / "data"
 
 # Direction weights: lower = more trusted. Left-of and above are the conventional
 # label positions in both table-based legacy forms (label | input) and stacked
@@ -46,18 +58,29 @@ EXTRACT_JS = """
   }
 
   const elements = [];
-  const controlNodes = document.querySelectorAll('input, textarea, select, button');
+  const controlNodes = document.querySelectorAll('input, textarea, select, button, a[href]');
   for (const el of controlNodes) {
     if (el.type === 'hidden') continue;
     if (!isVisible(el)) continue;
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) continue;
+
+    // Tag the live element with its position in this list. This lets later code
+    // ask the browser "which candidate (if any) does this DOM node belong to" with
+    // a single built-in call -- el.closest('[data-cua-id]') -- instead of having to
+    // compare element identity across separate evaluate() calls, which Playwright
+    // has no simple way to do.
+    const localId = elements.length;
+    el.setAttribute('data-cua-id', String(localId));
+
     elements.push({
       tag: el.tagName.toLowerCase(),
       type: el.type || null,
       id: el.id || null,
       name: el.name || null,
+      href: el.tagName === 'A' ? el.getAttribute('href') : null,
       own_text: (el.innerText || el.value || '').trim().slice(0, 80),
+      local_candidate_id: localId,
       rect: { x: r.x, y: r.y, width: r.width, height: r.height },
     });
   }
@@ -179,6 +202,11 @@ def infer_labels(elements, texts):
             "type": el["type"],
             "id": el["id"],
             "name": el["name"],
+            "frame_index": el["frame_index"],
+            "local_candidate_id": el["local_candidate_id"],
+            "rect": el["rect"],
+            "href": el.get("href"),
+            "frame_url": el.get("frame_url"),
             "own_text": el["own_text"],
             "inferred_label": best["text"] if best else None,
             "label_score": best["score"] if best else None,
@@ -189,19 +217,67 @@ def infer_labels(elements, texts):
     return results
 
 
+def frame_offset(frame):
+    """Top-page-relative (x, y) origin of `frame`'s content, or None if the
+    frame is detached/not currently rendered (caller should skip it)."""
+    if frame.parent_frame is None:
+        return 0.0, 0.0
+    element = frame.frame_element()
+    box = element.bounding_box()
+    if box is None:
+        return None
+    return box["x"], box["y"]
+
+
+def extract_all_frames(page):
+    """Runs EXTRACT_JS in every attached frame (main + nested) and merges the
+    results into one global element/text list, each rect translated into
+    top-page coordinates. A frame that fails (detached, no document yet,
+    navigated away mid-extraction) is skipped, not fatal."""
+    all_elements, all_texts = [], []
+    for frame_index, frame in enumerate(page.frames):
+        offset = frame_offset(frame)
+        if offset is None:
+            print(f"  (skipped detached frame: {frame.url})")
+            continue
+        ox, oy = offset
+        try:
+            data = frame.evaluate(EXTRACT_JS)
+        except Exception as e:
+            print(f"  (skipped frame {frame.url!r}: {e})")
+            continue
+        for el in data["elements"]:
+            el["rect"]["x"] += ox
+            el["rect"]["y"] += oy
+            el["frame_url"] = frame.url
+            # frame_index is this element's position in page.frames -- lets later
+            # code jump straight back to the exact frame it came from.
+            el["frame_index"] = frame_index
+            all_elements.append(el)
+        for t in data["texts"]:
+            t["rect"]["x"] += ox
+            t["rect"]["y"] += oy
+            all_texts.append(t)
+    return all_elements, all_texts
+
+
 def main():
+    target_url = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_TARGET_URL
+    out_name = sys.argv[2] if len(sys.argv) > 2 else "output.json"
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1280, "height": 900})
-        page.goto(TARGET_URL, wait_until="networkidle")
+        page.goto(target_url, wait_until="networkidle")
 
-        data = page.evaluate(EXTRACT_JS)
-        print(f"extracted {len(data['elements'])} interactive elements, "
-              f"{len(data['texts'])} text runs", flush=True)
+        elements, texts = extract_all_frames(page)
+        print(f"extracted {len(elements)} interactive elements, "
+              f"{len(texts)} text runs across {len(page.frames)} frame(s)", flush=True)
 
-        results = infer_labels(data["elements"], data["texts"])
+        results = infer_labels(elements, texts)
 
-        out_path = "output.json"
+        DATA_DIR.mkdir(exist_ok=True)
+        out_path = DATA_DIR / out_name
         with open(out_path, "w") as f:
             json.dump(results, f, indent=2)
 
