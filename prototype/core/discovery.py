@@ -21,11 +21,12 @@ import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 import anthropic
 
 from locator_prototype import extract_all_frames, infer_labels
 from introspect import resolve_click_target, resolve_typing_target
+from matching import find_live_candidate
 
 load_dotenv()
 
@@ -40,10 +41,14 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 
 
 class CoverageGapError(Exception):
-    """Raised when the agent interacts with something our deterministic
-    extractor never found. This is a hard stop by design (see the loom
-    Decision "coverage-gap mismatch: hard-stop, not flag-and-continue") --
-    an artifact must never contain a step we can't describe for replay."""
+    """The agent acted on something our deterministic extractor never found.
+    Hard stop: an artifact must never contain a step we can't describe for
+    replay."""
+
+
+class CheckpointError(Exception):
+    """A declared checkpoint didn't hold. Hard stop, same reasoning as
+    CoverageGapError."""
 
 
 def describe_candidates(results):
@@ -73,6 +78,7 @@ class DiscoverySession:
         self.goal = goal
         self.client = anthropic.Anthropic()
         self.recorded_steps = []
+        self.checkpoints = []
         self.current_results = []  # latest extractor output, refreshed each turn
 
     def refresh_candidates(self):
@@ -119,7 +125,16 @@ class DiscoverySession:
                 f"in the agent -- stopping so it can be investigated."
             )
         frame_index, local_candidate_id = match
-        self.page.mouse.click(x, y)
+
+        # Waits out any navigation the click triggers (e.g. a form submit);
+        # a plain click only waits for the event to dispatch. Most clicks
+        # don't navigate at all, so timing out here is normal, not an error.
+        try:
+            with self.page.expect_navigation(timeout=3000):
+                self.page.mouse.click(x, y)
+        except PlaywrightTimeoutError:
+            pass
+
         self.record_step("click", frame_index, local_candidate_id)
 
     def handle_type(self, text):
@@ -142,6 +157,25 @@ class DiscoverySession:
         self.page.keyboard.press(key_text)
         print(f"  pressed key: {key_text}")
 
+    def handle_checkpoint(self, expected_label, reason):
+        """Checks a label the agent says it can currently see against the
+        candidate list it was last shown (not re-refreshed -- the label
+        should already be sitting in that same list)."""
+        found = find_live_candidate(self.current_results, expected_label)
+        self.checkpoints.append({
+            "after_step_index": len(self.recorded_steps) - 1,
+            "expected_label": expected_label,
+            "reason": reason,
+            "held": found is not None,
+        })
+        if found is None:
+            raise CheckpointError(
+                f"Agent named \"{expected_label}\" ({reason}) as something it could see, "
+                f"but it isn't in the candidate list it was actually just shown. Stopping "
+                f"so this can be investigated rather than continuing on a wrong assumption."
+            )
+        print(f"  checkpoint held: \"{expected_label}\" ({reason})")
+
 
 def build_tools():
     return [
@@ -160,6 +194,28 @@ def build_tools():
                 "required": ["success", "notes"],
             },
         },
+        {
+            "name": "declare_checkpoint",
+            "description": (
+                "Confirms you're in the expected state before relying on it for your next "
+                "step. Only call this using a label copied EXACTLY from the candidate list "
+                "you were just given in your last observation -- never a label you expect, "
+                "assume, or remember from a similar page. If you can't find something in "
+                "the current list that confirms you're where you intended to be, do not "
+                "call this tool -- that itself is useful information."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "expected_label": {
+                        "type": "string",
+                        "description": "A label copied verbatim from the candidate list you were just shown.",
+                    },
+                    "reason": {"type": "string", "description": "Why this confirms your intended state, in plain English."},
+                },
+                "required": ["expected_label", "reason"],
+            },
+        },
     ]
 
 
@@ -175,6 +231,11 @@ def run_discovery(target_url, goal, out_name="discovery_run.json"):
             "Use the computer tool to look at the screen and click/type as needed, "
             "exactly as a human would. Alongside each screenshot you will also be told "
             "what our own element detector currently sees on the page, for reference. "
+            "After an action that should change the page (e.g. submitting a form), look "
+            "at the candidate list you're given back and, if it confirms you reached the "
+            "state you intended, call declare_checkpoint with a label copied exactly from "
+            "that list -- this must describe what you actually observe, never what you "
+            "expect or assume before looking. "
             "When the goal is complete, or if you get stuck, call report_goal_status."
         )
 
@@ -210,6 +271,14 @@ def run_discovery(target_url, goal, out_name="discovery_run.json"):
                     final_status = block.input
                     done = True
                     print(f"  goal status: success={final_status['success']} -- {final_status['notes']}")
+
+                elif block.type == "tool_use" and block.name == "declare_checkpoint":
+                    session.handle_checkpoint(block.input["expected_label"], block.input["reason"])
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": "Checkpoint recorded.",
+                    })
 
                 elif block.type == "tool_use" and getattr(block, "toolset_name", None) == "computer":
                     # The computer_toolset_20260801 tool type hands back a separate
@@ -265,6 +334,7 @@ def run_discovery(target_url, goal, out_name="discovery_run.json"):
                 "goal": goal,
                 "final_status": final_status,
                 "steps": session.recorded_steps,
+                "checkpoints": session.checkpoints,
             }, f, indent=2)
         print(f"\nwrote {out_path}")
 

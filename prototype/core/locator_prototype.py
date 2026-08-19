@@ -17,10 +17,10 @@ Frame-aware: a page's visible content can be split across several separate
 documents (classic <frameset>/<frame>, or <iframe>) with no single DOM tree
 spanning all of it. We run the same extraction inside every attached frame and
 translate each frame's local rects into top-page coordinates using that frame's
-own bounding box (Playwright/CDP already composites this correctly across
-nesting depth -- verified empirically against a doubly-nested iframe, so no
-manual recursive offset math is needed). Matching (score_candidate) is entirely
-unaware that frames exist -- it just sees already-consistent global rects.
+own bounding box (Playwright/CDP composites this correctly across nesting
+depth, so no manual offset math is needed). Matching (score_candidate) is
+entirely unaware that frames exist -- it just sees already-consistent global
+rects.
 
 Run (from prototype/): .venv/bin/python core/locator_prototype.py [URL] [output_filename]
 """
