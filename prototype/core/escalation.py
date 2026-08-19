@@ -53,6 +53,13 @@ def run_escalation(page, refresh_candidates, reason, money_actions_authorized, a
     print(f"\n  === ESCALATION: {reason} ===")
     print(f"  screenshot: {screenshot_path}")
     print(f"  {description}")
+    print(
+        "\n  How to respond:\n"
+        "    <index>            click that candidate, e.g. \"5\"\n"
+        "    <index> <value>    click, then type that value, e.g. \"9 demo\"\n"
+        "    done               you've resolved it -- resume normal operation\n"
+        "    skip               you can't resolve it either -- fail this run"
+    )
 
     human_actions = []
     outcome = "done"
