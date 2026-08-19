@@ -4,13 +4,35 @@ checkpointing can re-locate an element without an LLM in the loop. Matches
 on inferred label text (falling back to own_text), exact only -- no fuzzy
 matching or confidence scoring, so a miss is always a clean "not found"
 rather than a guess.
+
+Also holds two small candidate-list utilities shared by discovery.py and
+escalation.py: describe_candidates (render a candidate list as text) and
+secret_ref_for_label (name the environment variable a secret's real value
+should be supplied under -- see discovery.py's record_step and replay.py's
+replay_step).
 """
 
-# What a redacted secret value looks like in a saved artifact (see
-# discovery.py's record_step). replay.py checks for this exact string to
-# fail clearly on a step it can't replay, rather than literally typing it
-# as if it were the real value.
-REDACTED_PLACEHOLDER = "[REDACTED]"
+import re
+
+
+def describe_candidates(results):
+    """A short, readable text block, one line per candidate -- what the
+    deterministic side currently sees, shown to both the LLM (as part of its
+    observation) and a human (during escalation)."""
+    lines = []
+    for i, r in enumerate(results):
+        label = r["inferred_label"] or "(no label found)"
+        lines.append(f"{i}. {r['tag']} ({r['type']}) -- \"{label}\"")
+    return "Elements the deterministic detector currently sees on this page:\n" + "\n".join(lines)
+
+
+def secret_ref_for_label(label):
+    """Deterministic environment-variable name for a secret field's label,
+    e.g. "Password" -> "SECRET_PASSWORD". The real value is never stored in
+    an artifact -- only this reference is; replay looks the real value up
+    from the environment (.env) at replay time."""
+    slug = re.sub(r"[^a-zA-Z0-9]+", "_", label).strip("_").upper()
+    return f"SECRET_{slug}"
 
 
 def find_live_candidate(fresh_candidates, label, tag=None, type_=None):
