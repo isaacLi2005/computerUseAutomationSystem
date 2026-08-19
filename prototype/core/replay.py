@@ -13,10 +13,11 @@ import json
 import sys
 from pathlib import Path
 
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
 
 from locator_prototype import extract_all_frames, infer_labels
 from matching import find_live_candidate
+from browser_actions import click_and_wait
 
 VIEWPORT_WIDTH = 1280
 VIEWPORT_HEIGHT = 900
@@ -36,23 +37,19 @@ def click_candidate(page, candidate):
     rect = candidate["rect"]
     x = rect["x"] + rect["width"] / 2
     y = rect["y"] + rect["height"] / 2
-    try:
-        with page.expect_navigation(timeout=3000):
-            page.mouse.click(x, y)
-    except PlaywrightTimeoutError:
-        pass
+    click_and_wait(page, x, y)
 
 
-def replay_step(page, step_index, step):
-    label = step["matched_candidate"]["inferred_label"]
-    tag = step["matched_candidate"]["tag"]
-    type_ = step["matched_candidate"]["type"]
+def replay_step(page, step):
+    label = step["target"]["label"]
+    tag = step["target"]["tag"]
+    type_ = step["target"]["type"]
 
     candidates = get_fresh_candidates(page)
     live = find_live_candidate(candidates, label, tag=tag, type_=type_)
     if live is None:
         raise ReplayError(
-            f"step {step_index} ({step['action']} on \"{label}\"): not found on "
+            f"step {step['step']} ({step['action']} on \"{label}\"): not found on "
             f"replay -- expected a {tag} labeled \"{label}\"."
         )
 
@@ -62,10 +59,9 @@ def replay_step(page, step_index, step):
         click_candidate(page, live)  # focus it first, don't assume it already has focus
         page.keyboard.type(step["value"])
     else:
-        raise ReplayError(f"step {step_index}: unknown action {step['action']!r}")
+        raise ReplayError(f"step {step['step']}: unknown action {step['action']!r}")
 
-    print(f"  replayed: {step['action']} on \"{label}\""
-          + (f" = {step['value']!r}" if step.get("value") else ""))
+    print(f"  replayed: {step['comment']}")
 
 
 def verify_checkpoint(page, checkpoint):
@@ -83,7 +79,7 @@ def replay(artifact_path, target_url):
     with open(artifact_path) as f:
         artifact = json.load(f)
 
-    checkpoints_by_step = {c["after_step_index"]: c for c in artifact["checkpoints"]}
+    checkpoints_by_step = {c["after_step"]: c for c in artifact["checkpoints"]}
     steps = artifact["steps"]
 
     result = {
@@ -100,11 +96,11 @@ def replay(artifact_path, target_url):
         page.goto(target_url, wait_until="networkidle")
 
         try:
-            for step_index, step in enumerate(steps):
-                replay_step(page, step_index, step)
-                result["steps_completed"] = step_index + 1
+            for step in steps:
+                replay_step(page, step)
+                result["steps_completed"] = step["step"]
 
-                checkpoint = checkpoints_by_step.get(step_index)
+                checkpoint = checkpoints_by_step.get(step["step"])
                 if checkpoint is not None:
                     verify_checkpoint(page, checkpoint)
 

@@ -17,16 +17,18 @@ Run (from prototype/, needs ANTHROPIC_API_KEY in .env):
 
 import base64
 import json
+import re
 import sys
 from pathlib import Path
 
 from dotenv import load_dotenv
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
 import anthropic
 
 from locator_prototype import extract_all_frames, infer_labels
 from introspect import resolve_click_target, resolve_typing_target
 from matching import find_live_candidate
+from browser_actions import click_and_wait
 
 load_dotenv()
 
@@ -62,22 +64,41 @@ def describe_candidates(results):
     return "Elements our deterministic detector currently sees on this page:\n" + "\n".join(lines)
 
 
-def find_candidate(results, frame_index, local_candidate_id):
+def find_candidate_by_id(results, frame_index, local_candidate_id):
     for r in results:
         if r["frame_index"] == frame_index and r["local_candidate_id"] == local_candidate_id:
             return r
     return None
 
 
+def slugify_goal(goal):
+    """Deterministic capability name from the goal text. Strips quoted
+    literals first (e.g. "'john'") so parameters mentioned in the goal
+    don't leak into the name, then lowercases and underscore-joins what's
+    left."""
+    without_quotes = re.sub(r"'[^']*'|\"[^\"]*\"", "", goal)
+    words = re.findall(r"[a-zA-Z0-9]+", without_quotes.lower())
+    return "_".join(words) or "unnamed_capability"
+
+
+def describe_step(action, value, label):
+    """Deterministic, human-readable one-liner for a recorded step. Only
+    "click" and "type" ever get recorded (see handle_key), so these two
+    templates cover every case."""
+    if action == "type":
+        return f'Insert "{value}" into {label}'
+    return f'Click "{label}"'
+
+
 class DiscoverySession:
     """Holds all the state for one discovery run: the browser page, the
     running conversation with the model, and the list of recorded steps."""
 
-    def __init__(self, page, goal):
+    def __init__(self, page):
         self.page = page
-        self.goal = goal
         self.client = anthropic.Anthropic()
         self.recorded_steps = []
+        self.debug_steps = []  # full candidate detail, kept out of the main artifact
         self.checkpoints = []
         self.current_results = []  # latest extractor output, refreshed each turn
 
@@ -107,14 +128,29 @@ class DiscoverySession:
         ]
 
     def record_step(self, action, frame_index, local_candidate_id, value=None):
-        candidate = find_candidate(self.current_results, frame_index, local_candidate_id)
+        candidate = find_candidate_by_id(self.current_results, frame_index, local_candidate_id)
+        label = candidate["inferred_label"]
+
+        step_number = len(self.recorded_steps) + 1
         self.recorded_steps.append({
+            "step": step_number,
+            "comment": describe_step(action, value, label),
             "action": action,
             "value": value,
-            "matched_candidate": candidate,
+            "target": {
+                "label": label,
+                "tag": candidate["tag"],
+                "type": candidate["type"],
+            },
         })
-        print(f"  recorded: {action} on \"{candidate['inferred_label']}\""
-              + (f" = {value!r}" if value else ""))
+        # Everything else about the match (score, geometry, which frame, the
+        # runner-up candidates) is our locator heuristic's own scratch-work --
+        # useful for debugging the heuristic, irrelevant to what the capability
+        # does or to replaying it, so it's kept out of the main artifact and
+        # written to a separate debug file instead (see run_discovery).
+        self.debug_steps.append({"step": step_number, "matched_candidate": candidate})
+
+        print(f"  recorded: {action} on \"{label}\"" + (f" = {value!r}" if value else ""))
 
     def handle_left_click(self, x, y):
         match = resolve_click_target(self.page, x, y)
@@ -125,16 +161,7 @@ class DiscoverySession:
                 f"in the agent -- stopping so it can be investigated."
             )
         frame_index, local_candidate_id = match
-
-        # Waits out any navigation the click triggers (e.g. a form submit);
-        # a plain click only waits for the event to dispatch. Most clicks
-        # don't navigate at all, so timing out here is normal, not an error.
-        try:
-            with self.page.expect_navigation(timeout=3000):
-                self.page.mouse.click(x, y)
-        except PlaywrightTimeoutError:
-            pass
-
+        click_and_wait(self.page, x, y)
         self.record_step("click", frame_index, local_candidate_id)
 
     def handle_type(self, text):
@@ -163,7 +190,7 @@ class DiscoverySession:
         should already be sitting in that same list)."""
         found = find_live_candidate(self.current_results, expected_label)
         self.checkpoints.append({
-            "after_step_index": len(self.recorded_steps) - 1,
+            "after_step": len(self.recorded_steps),  # 1-indexed, matches steps[i]["step"]
             "expected_label": expected_label,
             "reason": reason,
             "held": found is not None,
@@ -225,7 +252,7 @@ def run_discovery(target_url, goal, out_name="discovery_run.json"):
         page = browser.new_page(viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT})
         page.goto(target_url, wait_until="networkidle")
 
-        session = DiscoverySession(page, goal)
+        session = DiscoverySession(page)
         system_prompt = (
             f"You are operating a real web browser to accomplish this goal: {goal}\n\n"
             "Use the computer tool to look at the screen and click/type as needed, "
@@ -248,97 +275,125 @@ def run_discovery(target_url, goal, out_name="discovery_run.json"):
         }]
 
         final_status = None
+        failure = None
 
-        for _turn in range(MAX_TURNS):
-            response = session.client.beta.messages.create(
-                model=MODEL,
-                max_tokens=1024,
-                system=system_prompt,
-                tools=build_tools(),
-                betas=[COMPUTER_TOOL_BETA],
-                messages=messages,
-            )
-            messages.append({"role": "assistant", "content": response.content})
-
-            tool_results = []
-            done = False
-
-            for block in response.content:
-                if block.type == "text":
-                    print(f"  agent: {block.text}")
-
-                elif block.type == "tool_use" and block.name == "report_goal_status":
-                    final_status = block.input
-                    done = True
-                    print(f"  goal status: success={final_status['success']} -- {final_status['notes']}")
-
-                elif block.type == "tool_use" and block.name == "declare_checkpoint":
-                    session.handle_checkpoint(block.input["expected_label"], block.input["reason"])
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": "Checkpoint recorded.",
-                    })
-
-                elif block.type == "tool_use" and getattr(block, "toolset_name", None) == "computer":
-                    # The computer_toolset_20260801 tool type hands back a separate
-                    # tool_use per action (block.name IS the action -- "left_click",
-                    # "type", "key", "screenshot", ...), unlike the older single
-                    # "computer" tool that used one shared name plus an "action" field.
-                    action = block.name
-                    print(f"  action: {action} {block.input}")
-
-                    if action == "screenshot":
-                        pass  # observation_blocks() below already refreshes the view
-                    elif action == "left_click":
-                        x, y = block.input["coordinate"]
-                        session.handle_left_click(x, y)
-                    elif action == "type":
-                        session.handle_type(block.input["text"])
-                    elif action == "key":
-                        session.handle_key(block.input["text"])
-                    elif action == "wait":
-                        # Used after an action that triggers a page navigation
-                        # (e.g. submitting a login form) so the next screenshot
-                        # reflects the new page instead of a half-loaded one.
-                        seconds = block.input.get("duration", 1)
-                        page.wait_for_timeout(seconds * 1000)
-                    else:
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "toolset_name": "computer",
-                            "content": f"Action '{action}' isn't implemented yet in this prototype.",
-                            "is_error": True,
-                        })
-                        continue
-
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "toolset_name": "computer",
-                        "content": session.observation_blocks(),
-                    })
-
-            if done:
-                break
-            if tool_results:
-                messages.append({"role": "user", "content": tool_results})
-            else:
-                break  # model returned no tool calls at all -- nothing left to do
+        try:
+            final_status = run_turns(session, page, system_prompt, messages)
+        except (CoverageGapError, CheckpointError) as e:
+            failure = str(e)
+            print(f"  DISCOVERY FAILED: {e}")
 
         DATA_DIR.mkdir(exist_ok=True)
+
         out_path = DATA_DIR / out_name
         with open(out_path, "w") as f:
             json.dump({
+                "name": slugify_goal(goal),
+                "version": 1,
                 "goal": goal,
                 "final_status": final_status,
+                "failure": failure,
                 "steps": session.recorded_steps,
                 "checkpoints": session.checkpoints,
             }, f, indent=2)
         print(f"\nwrote {out_path}")
 
+        # Locator-heuristic debug detail (see record_step) lives in its own
+        # file, paired by name, rather than inside the main artifact.
+        debug_path = DATA_DIR / out_name.replace(".json", "_debug.json")
+        with open(debug_path, "w") as f:
+            json.dump({"steps": session.debug_steps}, f, indent=2)
+        print(f"wrote {debug_path}")
+
         browser.close()
+
+
+def run_turns(session, page, system_prompt, messages):
+    """Runs the model/tool-execution loop until report_goal_status is called
+    or the model stops issuing tool calls. Returns final_status (the
+    report_goal_status input), or None if the model never called it.
+    CoverageGapError/CheckpointError propagate up to the caller."""
+    final_status = None
+
+    for _turn in range(MAX_TURNS):
+        response = session.client.beta.messages.create(
+            model=MODEL,
+            max_tokens=1024,
+            system=system_prompt,
+            tools=build_tools(),
+            betas=[COMPUTER_TOOL_BETA],
+            messages=messages,
+        )
+        messages.append({"role": "assistant", "content": response.content})
+
+        tool_results = []
+        done = False
+
+        for block in response.content:
+            if block.type == "text":
+                print(f"  agent: {block.text}")
+
+            elif block.type == "tool_use" and block.name == "report_goal_status":
+                final_status = block.input
+                done = True
+                print(f"  goal status: success={final_status['success']} -- {final_status['notes']}")
+
+            elif block.type == "tool_use" and block.name == "declare_checkpoint":
+                session.handle_checkpoint(block.input["expected_label"], block.input["reason"])
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": "Checkpoint recorded.",
+                })
+
+            elif block.type == "tool_use" and getattr(block, "toolset_name", None) == "computer":
+                # The computer_toolset_20260801 tool type hands back a separate
+                # tool_use per action (block.name IS the action -- "left_click",
+                # "type", "key", "screenshot", ...), unlike the older single
+                # "computer" tool that used one shared name plus an "action" field.
+                action = block.name
+                print(f"  action: {action} {block.input}")
+
+                if action == "screenshot":
+                    pass  # observation_blocks() below already refreshes the view
+                elif action == "left_click":
+                    x, y = block.input["coordinate"]
+                    session.handle_left_click(x, y)
+                elif action == "type":
+                    session.handle_type(block.input["text"])
+                elif action == "key":
+                    session.handle_key(block.input["text"])
+                elif action == "wait":
+                    # Used after an action that triggers a page navigation
+                    # (e.g. submitting a login form) so the next screenshot
+                    # reflects the new page instead of a half-loaded one.
+                    seconds = block.input.get("duration", 1)
+                    page.wait_for_timeout(seconds * 1000)
+                else:
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "toolset_name": "computer",
+                        "content": f"Action '{action}' isn't implemented yet in this prototype.",
+                        "is_error": True,
+                    })
+                    continue
+
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "toolset_name": "computer",
+                    "content": session.observation_blocks(),
+                })
+
+        if done:
+            break
+        if tool_results:
+            messages.append({"role": "user", "content": tool_results})
+        else:
+            break  # model returned no tool calls at all -- nothing left to do
+
+    return final_status
 
 
 if __name__ == "__main__":
