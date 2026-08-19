@@ -15,7 +15,7 @@ import sys
 from playwright.sync_api import sync_playwright
 
 from locator_prototype import extract_all_frames, infer_labels, DATA_DIR, VIEWPORT_WIDTH, VIEWPORT_HEIGHT
-from matching import find_live_candidate
+from matching import find_live_candidate, REDACTED_PLACEHOLDER
 from browser_actions import click_and_wait
 
 
@@ -51,6 +51,12 @@ def replay_step(page, step):
     if step["action"] == "click":
         click_candidate(page, live)
     elif step["action"] == "type":
+        if step["value"] == REDACTED_PLACEHOLDER:
+            raise ReplayError(
+                f"step {step['step']} (type into \"{label}\"): this value was redacted "
+                f"as a secret at discovery time and was never saved, so it can't be "
+                f"replayed. Secret-touching steps aren't replayable yet."
+            )
         click_candidate(page, live)  # focus it first, don't assume it already has focus
         page.keyboard.type(step["value"])
     else:

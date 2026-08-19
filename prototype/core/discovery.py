@@ -19,6 +19,7 @@ import base64
 import json
 import re
 import sys
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
@@ -26,21 +27,36 @@ import anthropic
 
 from locator_prototype import extract_all_frames, infer_labels, DATA_DIR, VIEWPORT_WIDTH, VIEWPORT_HEIGHT
 from introspect import resolve_click_target, resolve_typing_target
-from matching import find_live_candidate
+from matching import find_live_candidate, REDACTED_PLACEHOLDER
 from browser_actions import click_and_wait
 
 load_dotenv()
 
-MODEL = "claude-sonnet-5"
-COMPUTER_TOOL_TYPE = "computer_toolset_20260801"
+MODEL = "claude-sonnet-4-5-20250929"
+COMPUTER_TOOL_TYPE = "computer_20250124"
 COMPUTER_TOOL_BETA = "computer-use-2025-01-24"
 MAX_TURNS = 20
+
+# Guardrail: any candidate label or goal text containing one of these is
+# treated as moving money to/from an account.
+MONEY_KEYWORDS = ["transfer", "withdraw", "deposit", "pay", "loan"]
+
+
+def mentions_money_movement(text):
+    text = (text or "").lower()
+    return any(keyword in text for keyword in MONEY_KEYWORDS)
 
 
 class CoverageGapError(Exception):
     """The agent acted on something our deterministic extractor never found.
     Hard stop: an artifact must never contain a step we can't describe for
     replay."""
+
+
+class GuardrailError(Exception):
+    """The agent tried to leave the allowed site, or act on something that
+    moves money without the goal authorizing it. Hard stop, same policy as
+    CoverageGapError."""
 
 
 class CheckpointError(Exception):
@@ -85,12 +101,26 @@ def describe_step(action, value, label):
     return f'Click "{label}"'
 
 
+def redact_candidate(candidate):
+    """A copy of a candidate dict with the session id stripped out of any
+    URL field. A session id is a bearer token for an authenticated session --
+    leaking it into a debug file is the same class of problem as leaking a
+    password."""
+    redacted = dict(candidate)
+    for field in ("href", "frame_url"):
+        if redacted.get(field):
+            redacted[field] = re.sub(r";jsessionid=[^?#]*", "", redacted[field])
+    return redacted
+
+
 class DiscoverySession:
     """Holds all the state for one discovery run: the browser page, the
     running conversation with the model, and the list of recorded steps."""
 
-    def __init__(self, page):
+    def __init__(self, page, goal, allowed_domain):
         self.page = page
+        self.allowed_domain = allowed_domain
+        self.money_actions_authorized = mentions_money_movement(goal)
         self.client = anthropic.Anthropic()
         self.messages = []
         self.recorded_steps = []
@@ -127,12 +157,20 @@ class DiscoverySession:
         candidate = find_candidate_by_id(self.current_results, frame_index, local_candidate_id)
         label = candidate["inferred_label"]
 
+        # Never persist a password value -- redact before it touches the
+        # artifact, the step comment, the debug file, or the console. The
+        # real value already reached the browser via handle_type(); this is
+        # only about what gets written down afterward. A click on a password
+        # field has no value to redact in the first place (value is None).
+        is_secret = value is not None and candidate["type"] == "password"
+        display_value = REDACTED_PLACEHOLDER if is_secret else value
+
         step_number = len(self.recorded_steps) + 1
         self.recorded_steps.append({
             "step": step_number,
-            "comment": describe_step(action, value, label),
+            "comment": describe_step(action, display_value, label),
             "action": action,
-            "value": value,
+            "value": display_value,
             "target": {
                 "label": label,
                 "tag": candidate["tag"],
@@ -144,9 +182,36 @@ class DiscoverySession:
         # useful for debugging the heuristic, irrelevant to what the capability
         # does or to replaying it, so it's kept out of the main artifact and
         # written to a separate debug file instead (see run_discovery).
-        self.debug_steps.append({"step": step_number, "matched_candidate": candidate})
+        self.debug_steps.append({"step": step_number, "matched_candidate": redact_candidate(candidate)})
 
-        print(f"  recorded: {action} on \"{label}\"" + (f" = {value!r}" if value else ""))
+        print(f"  recorded: {action} on \"{label}\"" + (f" = {display_value!r}" if display_value else ""))
+
+    def check_money_guardrail(self, candidate):
+        label = candidate["inferred_label"]
+        if not mentions_money_movement(label):
+            return
+
+        if not self.money_actions_authorized:
+            raise GuardrailError(
+                f"Agent tried to act on \"{label}\", which looks like it moves money "
+                f"to or from an account, but the goal never mentioned doing that. Stopping."
+            )
+
+        # The goal DOES ask for a money-movement action, but that alone still
+        # isn't enough to just let it happen -- a human has to explicitly
+        # approve it, at the moment of action, every time.
+        answer = input(f'\n  >>> agent wants to act on "{label}", which moves money. Allow? [y/N] ')
+        if answer.strip().lower() != "y":
+            raise GuardrailError(f'Human did not approve "{label}". Stopping.')
+        print(f'  human approved: "{label}"')
+
+    def check_domain(self):
+        current_domain = urlparse(self.page.url).netloc
+        if current_domain != self.allowed_domain:
+            raise GuardrailError(
+                f"Agent navigated to {self.page.url}, outside the allowed site "
+                f"({self.allowed_domain}). Stopping."
+            )
 
     def handle_left_click(self, x, y):
         match = resolve_click_target(self.page, x, y)
@@ -157,11 +222,14 @@ class DiscoverySession:
                 f"in the agent -- stopping so it can be investigated."
             )
         frame_index, local_candidate_id = match
+        candidate = find_candidate_by_id(self.current_results, frame_index, local_candidate_id)
+        self.check_money_guardrail(candidate)
+
         click_and_wait(self.page, x, y)
+        self.check_domain()
         self.record_step("click", frame_index, local_candidate_id)
 
     def handle_type(self, text):
-        self.page.keyboard.type(text)
         match = resolve_typing_target(self.page)
         if match is None:
             raise CoverageGapError(
@@ -170,6 +238,10 @@ class DiscoverySession:
                 f"stopping so it can be investigated."
             )
         frame_index, local_candidate_id = match
+        candidate = find_candidate_by_id(self.current_results, frame_index, local_candidate_id)
+        self.check_money_guardrail(candidate)
+
+        self.page.keyboard.type(text)
         self.record_step("type", frame_index, local_candidate_id, value=text)
 
     def handle_key(self, key_text):
@@ -202,7 +274,12 @@ class DiscoverySession:
 
 def build_tools():
     return [
-        {"type": COMPUTER_TOOL_TYPE},
+        {
+            "type": COMPUTER_TOOL_TYPE,
+            "name": "computer",
+            "display_width_px": VIEWPORT_WIDTH,
+            "display_height_px": VIEWPORT_HEIGHT,
+        },
         {
             "name": "report_goal_status",
             "description": "Call this once the goal is complete, or if you are stuck and cannot proceed.",
@@ -230,7 +307,11 @@ def build_tools():
                 "properties": {
                     "expected_label": {
                         "type": "string",
-                        "description": "A label copied verbatim from the candidate list you were just shown.",
+                        "description": (
+                            "ONLY the quoted text from a candidate list line, not the whole "
+                            "line. E.g. if the list shows: 5. a (None) -- \"Log Out\", pass "
+                            "exactly Log Out -- not \"5. a (None) -- \\\"Log Out\\\"\"."
+                        ),
                     },
                     "reason": {"type": "string", "description": "Why this confirms your intended state, in plain English."},
                 },
@@ -246,7 +327,8 @@ def run_discovery(target_url, goal, out_name="discovery_run.json"):
         page = browser.new_page(viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT})
         page.goto(target_url, wait_until="networkidle")
 
-        session = DiscoverySession(page)
+        allowed_domain = urlparse(target_url).netloc
+        session = DiscoverySession(page, goal, allowed_domain)
         system_prompt = (
             f"You are operating a real web browser to accomplish this goal: {goal}\n\n"
             "Use the computer tool to look at the screen and click/type as needed, "
@@ -273,7 +355,7 @@ def run_discovery(target_url, goal, out_name="discovery_run.json"):
 
         try:
             final_status = run_turns(session, system_prompt)
-        except (CoverageGapError, CheckpointError) as e:
+        except (CoverageGapError, CheckpointError, GuardrailError) as e:
             failure = str(e)
             print(f"  DISCOVERY FAILED: {e}")
 
@@ -341,12 +423,8 @@ def run_turns(session, system_prompt):
                     "content": "Checkpoint recorded.",
                 })
 
-            elif block.type == "tool_use" and getattr(block, "toolset_name", None) == "computer":
-                # The computer_toolset_20260801 tool type hands back a separate
-                # tool_use per action (block.name IS the action -- "left_click",
-                # "type", "key", "screenshot", ...), unlike the older single
-                # "computer" tool that used one shared name plus an "action" field.
-                action = block.name
+            elif block.type == "tool_use" and block.name == "computer":
+                action = block.input.get("action")
                 print(f"  action: {action} {block.input}")
 
                 if action == "screenshot":
@@ -368,7 +446,6 @@ def run_turns(session, system_prompt):
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "toolset_name": "computer",
                         "content": f"Action '{action}' isn't implemented yet in this prototype.",
                         "is_error": True,
                     })
@@ -377,7 +454,6 @@ def run_turns(session, system_prompt):
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": block.id,
-                    "toolset_name": "computer",
                     "content": session.observation_blocks(),
                 })
 

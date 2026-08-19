@@ -6,6 +6,12 @@ matching or confidence scoring, so a miss is always a clean "not found"
 rather than a guess.
 """
 
+# What a redacted secret value looks like in a saved artifact (see
+# discovery.py's record_step). replay.py checks for this exact string to
+# fail clearly on a step it can't replay, rather than literally typing it
+# as if it were the real value.
+REDACTED_PLACEHOLDER = "[REDACTED]"
+
 
 def find_live_candidate(fresh_candidates, label, tag=None, type_=None):
     """Returns the fresh candidate dict whose label matches `label`, or None
