@@ -19,13 +19,12 @@ import base64
 import json
 import re
 import sys
-from pathlib import Path
 
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 import anthropic
 
-from locator_prototype import extract_all_frames, infer_labels
+from locator_prototype import extract_all_frames, infer_labels, DATA_DIR, VIEWPORT_WIDTH, VIEWPORT_HEIGHT
 from introspect import resolve_click_target, resolve_typing_target
 from matching import find_live_candidate
 from browser_actions import click_and_wait
@@ -35,11 +34,7 @@ load_dotenv()
 MODEL = "claude-sonnet-5"
 COMPUTER_TOOL_TYPE = "computer_toolset_20260801"
 COMPUTER_TOOL_BETA = "computer-use-2025-01-24"
-VIEWPORT_WIDTH = 1280
-VIEWPORT_HEIGHT = 900
 MAX_TURNS = 20
-
-DATA_DIR = Path(__file__).parent.parent / "data"
 
 
 class CoverageGapError(Exception):
@@ -97,6 +92,7 @@ class DiscoverySession:
     def __init__(self, page):
         self.page = page
         self.client = anthropic.Anthropic()
+        self.messages = []
         self.recorded_steps = []
         self.debug_steps = []  # full candidate detail, kept out of the main artifact
         self.checkpoints = []
@@ -206,9 +202,7 @@ class DiscoverySession:
 
 def build_tools():
     return [
-        {
-            "type": COMPUTER_TOOL_TYPE,
-        },
+        {"type": COMPUTER_TOOL_TYPE},
         {
             "name": "report_goal_status",
             "description": "Call this once the goal is complete, or if you are stuck and cannot proceed.",
@@ -266,19 +260,19 @@ def run_discovery(target_url, goal, out_name="discovery_run.json"):
             "When the goal is complete, or if you get stuck, call report_goal_status."
         )
 
-        messages = [{
+        session.messages.append({
             "role": "user",
             "content": [
                 {"type": "text", "text": f"Goal: {goal}"},
                 *session.observation_blocks(),
             ],
-        }]
+        })
 
         final_status = None
         failure = None
 
         try:
-            final_status = run_turns(session, page, system_prompt, messages)
+            final_status = run_turns(session, system_prompt)
         except (CoverageGapError, CheckpointError) as e:
             failure = str(e)
             print(f"  DISCOVERY FAILED: {e}")
@@ -308,23 +302,24 @@ def run_discovery(target_url, goal, out_name="discovery_run.json"):
         browser.close()
 
 
-def run_turns(session, page, system_prompt, messages):
+def run_turns(session, system_prompt):
     """Runs the model/tool-execution loop until report_goal_status is called
     or the model stops issuing tool calls. Returns final_status (the
     report_goal_status input), or None if the model never called it.
     CoverageGapError/CheckpointError propagate up to the caller."""
     final_status = None
+    tools = build_tools()
 
     for _turn in range(MAX_TURNS):
         response = session.client.beta.messages.create(
             model=MODEL,
             max_tokens=1024,
             system=system_prompt,
-            tools=build_tools(),
+            tools=tools,
             betas=[COMPUTER_TOOL_BETA],
-            messages=messages,
+            messages=session.messages,
         )
-        messages.append({"role": "assistant", "content": response.content})
+        session.messages.append({"role": "assistant", "content": response.content})
 
         tool_results = []
         done = False
@@ -368,7 +363,7 @@ def run_turns(session, page, system_prompt, messages):
                     # (e.g. submitting a login form) so the next screenshot
                     # reflects the new page instead of a half-loaded one.
                     seconds = block.input.get("duration", 1)
-                    page.wait_for_timeout(seconds * 1000)
+                    session.page.wait_for_timeout(seconds * 1000)
                 else:
                     tool_results.append({
                         "type": "tool_result",
@@ -389,7 +384,7 @@ def run_turns(session, page, system_prompt, messages):
         if done:
             break
         if tool_results:
-            messages.append({"role": "user", "content": tool_results})
+            session.messages.append({"role": "user", "content": tool_results})
         else:
             break  # model returned no tool calls at all -- nothing left to do
 

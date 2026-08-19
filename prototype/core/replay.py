@@ -11,17 +11,12 @@ Run (from prototype/):
 
 import json
 import sys
-from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from locator_prototype import extract_all_frames, infer_labels
+from locator_prototype import extract_all_frames, infer_labels, DATA_DIR, VIEWPORT_WIDTH, VIEWPORT_HEIGHT
 from matching import find_live_candidate
 from browser_actions import click_and_wait
-
-VIEWPORT_WIDTH = 1280
-VIEWPORT_HEIGHT = 900
-DATA_DIR = Path(__file__).parent.parent / "data"
 
 
 class ReplayError(Exception):

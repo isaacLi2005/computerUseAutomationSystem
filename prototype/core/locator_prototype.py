@@ -34,6 +34,8 @@ from playwright.sync_api import sync_playwright
 
 DEFAULT_TARGET_URL = "https://parabank.parasoft.com/parabank/index.htm"
 DATA_DIR = Path(__file__).parent.parent / "data"
+VIEWPORT_WIDTH = 1280
+VIEWPORT_HEIGHT = 900
 
 # Direction weights: lower = more trusted. Left-of and above are the conventional
 # label positions in both table-based legacy forms (label | input) and stacked
@@ -267,7 +269,7 @@ def main():
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
-        page = browser.new_page(viewport={"width": 1280, "height": 900})
+        page = browser.new_page(viewport={"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT})
         page.goto(target_url, wait_until="networkidle")
 
         elements, texts = extract_all_frames(page)
