@@ -73,9 +73,7 @@ To see the human-escalation path fire for real: temporarily set `SECRET_PASSWORD
 `.env` to a wrong value and re-run replay. It types the wrong password, the post-login
 checkpoint fails, and an escalation prompt opens — a labeled screenshot, the full
 candidate list, and a queued-command interface to fix it live. Restore the correct
-value afterward. (`/evidence/replay_error_live_app_error/` shows this exact path
-firing for a different, genuinely unplanned reason: ParaBank's own demo server
-returning an internal error mid-run.)
+value afterward.
 
 ## Test suite
 
@@ -104,6 +102,6 @@ src/
   data/            gitignored scratch output: artifacts, debug files, escalation
                    screenshots from your own local runs -- regenerated automatically,
                    nothing here is meant to persist (see /evidence/ for what does)
-evidence/         curated real discovery + replay run output, including a replay
-                  that hits an error -- see evidence/README.md
+evidence/         artifact.json + discovery_log.txt + replay_log.txt -- one real
+                  discovery run and the replay of it, which hits a genuine error
 ```

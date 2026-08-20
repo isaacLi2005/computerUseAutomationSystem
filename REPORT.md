@@ -126,8 +126,7 @@ after a validation error) risks compounding the mistake more than it risks a slo
 recovery. The recorded `wait` is the one exception, since it isn't a guess — it's
 exact reproduction of a decision already made once.
 
-**Business outcome vs. hard failure — tested, not just designed
-(`evidence/business_outcome_demo/`).** For the common case — one stable field whose
+**Business outcome vs. hard failure — tested, not just designed.** For the common case — one stable field whose
 *value* varies across legitimate outcomes (a status of Approved/Denied, a balance,
 "no such member") — the existing `read` mechanism already solves this with no new
 schema field: `read_value` re-locates a target by its stable *label*, then reports
@@ -144,14 +143,14 @@ label. It worked anyway, by luck (the `own_text` fallback matched the value to
 itself), which is exactly how this class of bug hides right up until the outcome
 changes — replayed against an Approved page, that recording would raise
 `ReplayError` and escalate a perfectly legitimate answer as if something had broken.
-Confirmed directly (`evidence/business_outcome_demo/label_robustness_proof.txt`).
+Confirmed directly against a live Approved-outcome page during development.
 Fixed by strengthening `read_value`'s tool description to explicitly warn against
 anchoring to the value instead of the label; the next run picked the correct label
 unprompted.
 
 What this *doesn't* solve: outcomes with no stable field to read at all — e.g.
 ParaBank's transaction search, where "not found" is just an empty results table, no
-distinctive label anywhere (`evidence/replay_error_async_race/`). That still needs
+distinctive label anywhere. That still needs
 new machinery: a `business_outcome` status alongside `success`/`failure`, checked
 against a small editable per-capability pattern list (same shape as
 `MONEY_KEYWORDS`) before escalating, not instead of it — genuinely not built, unlike
@@ -270,8 +269,8 @@ pattern-classification ahead of writing anything to disk.
 
 - **Business-outcome vs. hard-failure for outcomes with no stable field to read.**
   The common case — a status/value that varies across legitimate outcomes — is
-  solved and proven (`read_value` anchored to a stable label; Section 3,
-  `evidence/business_outcome_demo/`). What's still two-state (`success`/`failure`)
+  solved and proven (`read_value` anchored to a stable label; Section 3). What's
+  still two-state (`success`/`failure`)
   is the structural case, where the alternate outcome is an *absence* with no label
   to key on at all (an empty results table, not a "not found" message) — the
   `business_outcome` status + pattern-list design in Section 3 covers this
