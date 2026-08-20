@@ -27,7 +27,7 @@ entirely unaware that frames exist -- it just sees already-consistent global
 rects.
 
 Standalone CLI, for eyeballing raw extraction/labeling output without running
-the full discovery/replay pipeline (run from prototype/):
+the full discovery/replay pipeline (run from src/):
     .venv/bin/python core/locator.py [URL] [output_filename]
 """
 
@@ -254,6 +254,15 @@ def infer_labels(elements, texts):
         })
 
     return results
+
+
+def rect_center(rect):
+    """(x, y) center of a candidate's rect dict -- shared by replay.py and
+    escalation.py, which both click a candidate's middle rather than its
+    top-left corner. (Rect.center above does the same thing, but for the
+    dataclass form used during extraction/scoring, not the plain dict form
+    candidates are passed around as everywhere else.)"""
+    return rect["x"] + rect["width"] / 2, rect["y"] + rect["height"] / 2
 
 
 def frame_offset(frame):

@@ -1,0 +1,115 @@
+{
+  "name": "log_in_with_username_and_password_then_open_the_first_account_listed_to_view_its_account_details_page_and_read_its_balance_from_there",
+  "version": 1,
+  "goal": "Log in with username 'john' and password 'demo', then open the first account listed to view its Account Details page, and read its balance from there",
+  "final_status": {
+    "success": true,
+    "notes": "Successfully logged in with username 'john' and password 'demo', navigated to the first account (Account #12345) from the accounts list, and read the balance from the Account Details page. The balance is -$2300.00."
+  },
+  "failure": null,
+  "steps": [
+    {
+      "step": 1,
+      "comment": "Click \"Username\"",
+      "action": "click",
+      "value": null,
+      "secret_ref": null,
+      "target": {
+        "label": "Username",
+        "tag": "input",
+        "type": "text"
+      }
+    },
+    {
+      "step": 2,
+      "comment": "Insert \"john\" into Username",
+      "action": "type",
+      "value": "john",
+      "secret_ref": null,
+      "target": {
+        "label": "Username",
+        "tag": "input",
+        "type": "text"
+      }
+    },
+    {
+      "step": 3,
+      "comment": "Click \"Password\"",
+      "action": "click",
+      "value": null,
+      "secret_ref": null,
+      "target": {
+        "label": "Password",
+        "tag": "input",
+        "type": "password"
+      }
+    },
+    {
+      "step": 4,
+      "comment": "Insert (secret: SECRET_PASSWORD) into Password",
+      "action": "type",
+      "value": null,
+      "secret_ref": "SECRET_PASSWORD",
+      "target": {
+        "label": "Password",
+        "tag": "input",
+        "type": "password"
+      }
+    },
+    {
+      "step": 5,
+      "comment": "Click \"Log In\"",
+      "action": "click",
+      "value": null,
+      "secret_ref": null,
+      "target": {
+        "label": "Log In",
+        "tag": "input",
+        "type": "submit"
+      }
+    },
+    {
+      "step": 6,
+      "comment": "Click \"12345\"",
+      "action": "click",
+      "value": null,
+      "secret_ref": null,
+      "target": {
+        "label": "12345",
+        "tag": "a",
+        "type": null
+      }
+    },
+    {
+      "step": 7,
+      "comment": "Read \"Balance:\" as balance",
+      "action": "read",
+      "value": null,
+      "secret_ref": null,
+      "target": {
+        "label": "Balance:",
+        "tag": "text",
+        "type": null
+      },
+      "output_key": "balance"
+    }
+  ],
+  "checkpoints": [
+    {
+      "after_step": 5,
+      "expected_label": "Accounts Overview",
+      "reason": "Successfully logged in and now viewing the accounts overview page which lists all accounts",
+      "held": true
+    },
+    {
+      "after_step": 6,
+      "expected_label": "Account Details",
+      "reason": "Successfully navigated to the Account Details page for the first account (12345)",
+      "held": true
+    }
+  ],
+  "escalations": [],
+  "outputs": {
+    "balance": "-$2300.00"
+  }
+}

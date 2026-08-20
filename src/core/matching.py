@@ -5,12 +5,14 @@ on inferred label text (falling back to own_text), exact only -- no fuzzy
 matching or confidence scoring, so a miss is always a clean "not found"
 rather than a guess.
 
-Also holds two small candidate-list utilities shared by discovery.py and
+Also holds small utilities shared across discovery.py, replay.py, and
 escalation.py: describe_candidates (render a candidate list as text -- for
 tag == "text" candidates, this also shows the current value, since those
-exist to be read, not clicked/typed into) and secret_ref_for_label (name the
+exist to be read, not clicked/typed into), secret_ref_for_label (name the
 environment variable a secret's real value should be supplied under -- see
-discovery.py's record_step and replay.py's replay_step).
+discovery.py's record_step and replay.py's replay_step), and print_outputs
+(the "outputs:" summary both discovery.py and replay.py print once a run
+finishes, e.g. after a read_value/read step).
 """
 
 import re
@@ -28,6 +30,17 @@ def describe_candidates(results):
         else:
             lines.append(f"{i}. {r['tag']} ({r['type']}) -- \"{label}\"")
     return "Elements the deterministic detector currently sees on this page:\n" + "\n".join(lines)
+
+
+def print_outputs(outputs):
+    """Prints the "outputs:" summary (output_key -> value) a run produced,
+    if any -- shared by discovery.py's run_discovery and replay.py's replay,
+    since both need to report the same thing at the end of a run."""
+    if not outputs:
+        return
+    print("\n  outputs:")
+    for key, value in outputs.items():
+        print(f"    {key} = {value!r}")
 
 
 def secret_ref_for_label(label):

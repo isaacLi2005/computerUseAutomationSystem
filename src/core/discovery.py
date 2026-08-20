@@ -11,7 +11,7 @@ This intentionally does NOT constrain what the agent can click -- it gets a
 real screenshot and can act on anything a human could. The candidate list is
 only used afterward, to check and record what it actually did.
 
-Run (from prototype/, needs ANTHROPIC_API_KEY in .env):
+Run (from src/, needs ANTHROPIC_API_KEY in .env):
     .venv/bin/python core/discovery.py
 """
 
@@ -27,7 +27,7 @@ import anthropic
 
 from locator import extract_all_frames, infer_labels, DATA_DIR, VIEWPORT_WIDTH, VIEWPORT_HEIGHT
 from introspect import resolve_click_target, resolve_typing_target
-from matching import find_live_candidate, describe_candidates, secret_ref_for_label
+from matching import find_live_candidate, describe_candidates, secret_ref_for_label, print_outputs
 from browser_actions import click_and_wait
 from guardrails import GuardrailError, check_money_guardrail, check_domain, mentions_money_movement
 from escalation import run_escalation
@@ -400,10 +400,7 @@ def run_discovery(target_url, goal, out_name="discovery_run.json"):
             failure = str(e)
             print(f"  DISCOVERY FAILED: {e}")
 
-        if session.outputs:
-            print("\n  outputs:")
-            for key, value in session.outputs.items():
-                print(f"    {key} = {value!r}")
+        print_outputs(session.outputs)
 
         DATA_DIR.mkdir(exist_ok=True)
 
@@ -520,7 +517,7 @@ def run_turns(session, system_prompt):
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": f"Action '{action}' isn't implemented yet in this prototype.",
+                        "content": f"Action '{action}' isn't implemented.",
                         "is_error": True,
                     })
                     continue

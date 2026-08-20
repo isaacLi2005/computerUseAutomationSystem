@@ -9,7 +9,7 @@ failure if the human can't fix it either. "wait" steps are the one exception:
 they have no target to re-locate, and just reproduce a deliberate pause the
 agent took during discovery (e.g. letting async content finish loading).
 
-Run (from prototype/):
+Run (from src/):
     .venv/bin/python core/replay.py [artifact_path] [target_url]
 """
 
@@ -21,8 +21,8 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
-from locator import extract_all_frames, infer_labels, DATA_DIR, VIEWPORT_WIDTH, VIEWPORT_HEIGHT
-from matching import find_live_candidate
+from locator import extract_all_frames, infer_labels, rect_center, DATA_DIR, VIEWPORT_WIDTH, VIEWPORT_HEIGHT
+from matching import find_live_candidate, print_outputs
 from browser_actions import click_and_wait
 from guardrails import mentions_money_movement
 from escalation import run_escalation
@@ -41,9 +41,7 @@ def get_fresh_candidates(page):
 
 
 def click_candidate(page, candidate):
-    rect = candidate["rect"]
-    x = rect["x"] + rect["width"] / 2
-    y = rect["y"] + rect["height"] / 2
+    x, y = rect_center(candidate["rect"])
     click_and_wait(page, x, y)
 
 
@@ -75,7 +73,7 @@ def replay_step(page, step):
     if live is None:
         raise ReplayError(
             f"step {step['step']} ({step['action']} on \"{label}\"): not found on "
-            f"replay -- expected a {tag} labeled \"{label}\"."
+            f"replay -- expected an element (tag={tag!r}) labeled \"{label}\"."
         )
 
     read_value = None
@@ -163,13 +161,13 @@ def replay(artifact_path, target_url):
 
         browser.close()
 
-    if result["outputs"]:
-        print("\n  outputs:")
-        for key, value in result["outputs"].items():
-            print(f"    {key} = {value!r}")
+    print_outputs(result["outputs"])
 
     DATA_DIR.mkdir(exist_ok=True)
-    out_path = DATA_DIR / "replay_run.json"
+    # Named after the artifact, not a fixed "replay_run.json" -- otherwise
+    # replaying two different artifacts back to back silently overwrites one
+    # result with the other.
+    out_path = DATA_DIR / f"{artifact.get('name', 'artifact')}_replay.json"
     with open(out_path, "w") as f:
         json.dump(result, f, indent=2)
     print(f"\nwrote {out_path}")

@@ -1,0 +1,106 @@
+{
+  "name": "log_in_with_username_and_password_then_read_the_total_account_abalance_across_all_accounts",
+  "version": 1,
+  "goal": "Log in with username 'john' and password 'demo', then read the total account abalance across all accounts",
+  "final_status": {
+    "success": true,
+    "notes": "Successfully logged in to ParaBank with username 'john' and password 'demo'. The login was successful and I was redirected to the Account Services page showing John Smith's accounts overview. The total account balance across all accounts is $3902.67. This total includes 12 individual accounts with varying balances ranging from -$2423.00 to $2333.00."
+  },
+  "failure": null,
+  "steps": [
+    {
+      "step": 1,
+      "comment": "Click \"Username\"",
+      "action": "click",
+      "value": null,
+      "secret_ref": null,
+      "target": {
+        "label": "Username",
+        "tag": "input",
+        "type": "text"
+      }
+    },
+    {
+      "step": 2,
+      "comment": "Insert \"john\" into Username",
+      "action": "type",
+      "value": "john",
+      "secret_ref": null,
+      "target": {
+        "label": "Username",
+        "tag": "input",
+        "type": "text"
+      }
+    },
+    {
+      "step": 3,
+      "comment": "Click \"Password\"",
+      "action": "click",
+      "value": null,
+      "secret_ref": null,
+      "target": {
+        "label": "Password",
+        "tag": "input",
+        "type": "password"
+      }
+    },
+    {
+      "step": 4,
+      "comment": "Insert (secret: SECRET_PASSWORD) into Password",
+      "action": "type",
+      "value": null,
+      "secret_ref": "SECRET_PASSWORD",
+      "target": {
+        "label": "Password",
+        "tag": "input",
+        "type": "password"
+      }
+    },
+    {
+      "step": 5,
+      "comment": "Click \"Log In\"",
+      "action": "click",
+      "value": null,
+      "secret_ref": null,
+      "target": {
+        "label": "Log In",
+        "tag": "input",
+        "type": "submit"
+      }
+    },
+    {
+      "step": 6,
+      "comment": "Wait 2s for the page to settle",
+      "action": "wait",
+      "value": null,
+      "secret_ref": null,
+      "target": null,
+      "seconds": 2
+    },
+    {
+      "step": 7,
+      "comment": "Read \"Total\" as total_balance",
+      "action": "read",
+      "value": null,
+      "secret_ref": null,
+      "target": {
+        "label": "Total",
+        "tag": "text",
+        "type": null
+      },
+      "output_key": "total_balance"
+    }
+  ],
+  "checkpoints": [
+    {
+      "after_step": 6,
+      "expected_label": "John Smith",
+      "reason": "This confirms I successfully logged in as John Smith and can see the welcome message",
+      "held": true
+    }
+  ],
+  "escalations": [],
+  "outputs": {
+    "total_balance": "$3902.67"
+  }
+}

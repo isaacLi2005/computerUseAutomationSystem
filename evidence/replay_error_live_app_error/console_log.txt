@@ -1,0 +1,40 @@
+  replayed: Click "Username"
+  replayed: Insert "john" into Username
+  replayed: Click "Password"
+  replayed: Insert (secret: SECRET_PASSWORD) into Password
+  replayed: Click "Log In"
+  replayed: Wait 2s for the page to settle
+
+  === ESCALATION: checkpoint failed: expected to still see "John Smith" (This confirms I successfully logged in as John Smith and can see the welcome message) but it's not there. ===
+  57 candidates currently on the page -- full list: /Users/isaacli/projects/computerUseAutomationSystem/prototype/data/escalation_cd3b6e57_1_candidates.txt
+
+  How to respond -- one command per line. Nothing touches the page until
+  you type "done": each line just queues an action against the candidate
+  list as it looks right now, so you can type a whole multi-step fix (e.g.
+  username, then password, then submit) without anything executing between
+  lines. Caveat: if an early queued action would itself change the page,
+  later indices in the same queue may no longer point at what you expect --
+  queue across a page change at your own risk.
+  A screenshot (numbered to match the candidate list) is at /Users/isaacli/projects/computerUseAutomationSystem/prototype/data/escalation_cd3b6e57_1.png.
+    <index>            queue a click, e.g. "5"
+    <index> <value>    queue a click, then type that value, e.g. "9 demo"
+    done               run everything queued so far, then resume
+    skip               give up without running anything -- fail this run
+
+  > queue action #1 ("5" to click, "9 demo" to type, "done" to run the queue, or "skip"): Traceback (most recent call last):
+  File "/Users/isaacli/projects/computerUseAutomationSystem/prototype/core/replay.py", line 145, in replay
+    verify_checkpoint(page, checkpoint)
+  File "/Users/isaacli/projects/computerUseAutomationSystem/prototype/core/replay.py", line 103, in verify_checkpoint
+    raise ReplayError(
+__main__.ReplayError: checkpoint failed: expected to still see "John Smith" (This confirms I successfully logged in as John Smith and can see the welcome message) but it's not there.
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/isaacli/projects/computerUseAutomationSystem/prototype/core/replay.py", line 180, in <module>
+    replay(artifact_file, url)
+  File "/Users/isaacli/projects/computerUseAutomationSystem/prototype/core/replay.py", line 150, in replay
+    outcome, record = run_escalation(
+  File "/Users/isaacli/projects/computerUseAutomationSystem/prototype/core/escalation.py", line 118, in run_escalation
+    answer = input(f'\n  > queue action #{len(queued) + 1} ("5" to click, "9 demo" to type, '
+EOFError: EOF when reading a line

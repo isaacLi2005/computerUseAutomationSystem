@@ -9,22 +9,28 @@ same index numbers (see _label_clickable_candidates), so a human can match
 printed list.
 
 The full loop lives here, shared by both callers -- not just the stateless
-pieces. It looked at first like discovery's and replay's action execution
-differ too much to share (discovery's normal handlers do live introspection
-to figure out what a raw agent coordinate landed on; replay just clicks a
-known candidate's center directly). But during escalation specifically, the
-human always picks a candidate by its known index -- no introspection is
-ever needed -- so the execution here is the same direct-click model replay
-already uses, in both contexts. Nothing left to duplicate.
+pieces. Discovery's normal handlers need live introspection
+(resolve_click_target) to figure out what a raw agent coordinate landed on;
+replay clicks a known candidate's center directly, since it already has the
+candidate. Escalation only ever needs the latter: a human always picks a
+candidate by its known index, never a raw coordinate, so both callers share
+this same direct-click execution model.
 """
+
+import uuid
 
 from PIL import Image, ImageDraw, ImageFont
 
-from locator import DATA_DIR
+from locator import DATA_DIR, rect_center
 from matching import describe_candidates
 from guardrails import check_money_guardrail, check_domain
 from browser_actions import click_and_wait
 
+# A short id generated once per process, not per escalation -- multiple
+# escalations within the same run still count 1, 2, 3... (readable), but two
+# separate discovery/replay runs never collide and overwrite each other's
+# screenshots, which a plain per-process counter starting back at 0 would do.
+_run_id = uuid.uuid4().hex[:8]
 _next_screenshot_id = 0
 
 
@@ -55,7 +61,7 @@ def _label_clickable_candidates(screenshot_path, results):
     image.save(screenshot_path)
 
 
-def capture_context(page, results, reason):
+def capture_context(page, results):
     """Screenshots the live page (labeled with clickable candidates' index
     numbers -- see _label_clickable_candidates) and writes the full
     candidate list out to its own paired text file, rather than dumping
@@ -64,8 +70,8 @@ def capture_context(page, results, reason):
     global _next_screenshot_id
     DATA_DIR.mkdir(exist_ok=True)
     _next_screenshot_id += 1
-    screenshot_path = DATA_DIR / f"escalation_{_next_screenshot_id}.png"
-    candidates_path = DATA_DIR / f"escalation_{_next_screenshot_id}_candidates.txt"
+    screenshot_path = DATA_DIR / f"escalation_{_run_id}_{_next_screenshot_id}.png"
+    candidates_path = DATA_DIR / f"escalation_{_run_id}_{_next_screenshot_id}_candidates.txt"
 
     page.screenshot(path=str(screenshot_path))
     _label_clickable_candidates(screenshot_path, results)
@@ -87,7 +93,7 @@ def run_escalation(page, refresh_candidates, reason, money_actions_authorized, a
     Returns (outcome, record) where outcome is "done" or "skip" and record
     is a dict to append to the artifact's escalations list."""
     results = refresh_candidates()
-    screenshot_path, candidates_path = capture_context(page, results, reason)
+    screenshot_path, candidates_path = capture_context(page, results)
     print(f"\n  === ESCALATION: {reason} ===")
     print(f"  {len(results)} candidates currently on the page -- full list: {candidates_path}")
     print(
@@ -137,8 +143,7 @@ def run_escalation(page, refresh_candidates, reason, money_actions_authorized, a
             label = candidate["inferred_label"]
             check_money_guardrail(label, money_actions_authorized)
 
-            rect = candidate["rect"]
-            x, y = rect["x"] + rect["width"] / 2, rect["y"] + rect["height"] / 2
+            x, y = rect_center(candidate["rect"])
             click_and_wait(page, x, y)
             if value is not None:
                 page.keyboard.type(value)

@@ -1,0 +1,26 @@
+  replayed: Click "Username"
+  replayed: Insert "john" into Username
+  replayed: Click "Password"
+  replayed: Insert (secret: SECRET_PASSWORD) into Password
+  replayed: Click "Log In"
+  checkpoint verified: "Accounts Overview"
+
+  === ESCALATION: step 6 (click on "12345"): not found on replay -- expected an element (tag='a') labeled "12345". ===
+  69 candidates currently on the page -- full list: /Users/isaacli/projects/computerUseAutomationSystem/prototype/data/escalation_78a2355f_1_candidates.txt
+
+  How to respond -- one command per line. Nothing touches the page until
+  you type "done": each line just queues an action against the candidate
+  list as it looks right now, so you can type a whole multi-step fix (e.g.
+  username, then password, then submit) without anything executing between
+  lines. Caveat: if an early queued action would itself change the page,
+  later indices in the same queue may no longer point at what you expect --
+  queue across a page change at your own risk.
+  A screenshot (numbered to match the candidate list) is at /Users/isaacli/projects/computerUseAutomationSystem/prototype/data/escalation_78a2355f_1.png.
+    <index>            queue a click, e.g. "5"
+    <index> <value>    queue a click, then type that value, e.g. "9 demo"
+    done               run everything queued so far, then resume
+    skip               give up without running anything -- fail this run
+
+  > queue action #1 ("5" to click, "9 demo" to type, "done" to run the queue, or "skip"):   REPLAY FAILED: step 6 (click on "12345"): not found on replay -- expected an element (tag='a') labeled "12345".
+
+wrote /Users/isaacli/projects/computerUseAutomationSystem/prototype/data/replay_run.json

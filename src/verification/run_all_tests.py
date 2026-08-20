@@ -1,9 +1,9 @@
 """
-Repeatable regression suite for the whole prototype -- locator, frame
+Repeatable regression suite for the whole system -- locator, frame
 handling, matching, guardrails, escalation, introspection, and replay. Run
 any time to confirm nothing has broken.
 
-Run (from prototype/):
+Run (from src/):
     .venv/bin/python verification/run_all_tests.py
 
 Everything here is fast and free (no API key, no LLM calls) except the one

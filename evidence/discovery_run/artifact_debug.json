@@ -1,13 +1,7 @@
 {
-  "goal": "Log in with username 'john' and password 'demo'",
-  "final_status": {
-    "success": true,
-    "notes": "Successfully logged into ParaBank with username 'john' and password 'demo'. The page now shows 'Welcome John Smith' and the Accounts Overview screen, confirming successful authentication."
-  },
   "steps": [
     {
-      "action": "click",
-      "value": null,
+      "step": 1,
       "matched_candidate": {
         "tag": "input",
         "type": "text",
@@ -47,8 +41,7 @@
       }
     },
     {
-      "action": "type",
-      "value": "john",
+      "step": 2,
       "matched_candidate": {
         "tag": "input",
         "type": "text",
@@ -88,8 +81,7 @@
       }
     },
     {
-      "action": "click",
-      "value": null,
+      "step": 3,
       "matched_candidate": {
         "tag": "input",
         "type": "password",
@@ -129,8 +121,7 @@
       }
     },
     {
-      "action": "type",
-      "value": "demo",
+      "step": 4,
       "matched_candidate": {
         "tag": "input",
         "type": "password",
@@ -170,8 +161,7 @@
       }
     },
     {
-      "action": "click",
-      "value": null,
+      "step": 5,
       "matched_candidate": {
         "tag": "input",
         "type": "submit",
@@ -206,6 +196,86 @@
             "text": "Password",
             "score": 38.5,
             "direction": "above"
+          }
+        ]
+      }
+    },
+    {
+      "step": 6,
+      "matched_candidate": {
+        "tag": "a",
+        "type": null,
+        "id": null,
+        "name": null,
+        "frame_index": 0,
+        "local_candidate_id": 16,
+        "rect": {
+          "x": 492.0,
+          "y": 350.0,
+          "width": 37.953125,
+          "height": 15
+        },
+        "href": "activity.htm?id=12345",
+        "frame_url": "https://parabank.parasoft.com/parabank/overview.htm",
+        "own_text": "12345",
+        "inferred_label": "12345",
+        "label_score": 0.0,
+        "label_direction": "own_text",
+        "top_candidates": [
+          {
+            "text": "12345",
+            "score": 0.0,
+            "direction": "own_text"
+          },
+          {
+            "text": "12345",
+            "score": 0.0,
+            "direction": "diagonal"
+          },
+          {
+            "text": "Account",
+            "score": 15.6,
+            "direction": "above"
+          }
+        ]
+      }
+    },
+    {
+      "step": 7,
+      "matched_candidate": {
+        "tag": "text",
+        "type": null,
+        "id": null,
+        "name": null,
+        "frame_index": 0,
+        "local_candidate_id": 27,
+        "rect": {
+          "x": 595.4375,
+          "y": 365.0,
+          "width": 58.5625,
+          "height": 15
+        },
+        "href": null,
+        "frame_url": "https://parabank.parasoft.com/parabank/activity.htm?id=12345",
+        "own_text": "-$2300.00",
+        "inferred_label": "Balance:",
+        "label_score": 4.0,
+        "label_direction": "left",
+        "top_candidates": [
+          {
+            "text": "Balance:",
+            "score": 4.0,
+            "direction": "left"
+          },
+          {
+            "text": "CHECKING",
+            "score": 9.6,
+            "direction": "above"
+          },
+          {
+            "text": "$0.00",
+            "score": 24.0,
+            "direction": "below"
           }
         ]
       }

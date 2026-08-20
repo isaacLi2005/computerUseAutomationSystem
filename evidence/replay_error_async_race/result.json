@@ -1,0 +1,16 @@
+{
+  "goal": "Log in with username 'john' and password 'demo', then open the first account listed to view its Account Details page, and read its balance from there",
+  "status": "failure",
+  "steps_completed": 5,
+  "total_steps": 7,
+  "failure": "step 6 (click on \"12345\"): not found on replay -- expected an element (tag='a') labeled \"12345\".",
+  "escalations": [
+    {
+      "reason": "step 6 (click on \"12345\"): not found on replay -- expected an element (tag='a') labeled \"12345\".",
+      "screenshot": "/Users/isaacli/projects/computerUseAutomationSystem/prototype/data/escalation_78a2355f_1.png",
+      "human_actions": [],
+      "outcome": "skip"
+    }
+  ],
+  "outputs": {}
+}
