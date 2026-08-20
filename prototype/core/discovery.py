@@ -2,7 +2,7 @@
 Discovery agent: an LLM drives the real browser UI (unfiltered -- real
 screenshots, real clicks, nothing hidden from it) to accomplish a goal. Every
 action it takes is checked against the candidate list our deterministic
-extractor already found (locator_prototype.py). If an action can't be matched
+extractor already found (locator.py). If an action can't be matched
 to a known candidate, that's a genuine coverage gap in the deterministic
 side, and we stop immediately with a clear error rather than silently
 recording a step we could never replay later.
@@ -25,7 +25,7 @@ from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 import anthropic
 
-from locator_prototype import extract_all_frames, infer_labels, DATA_DIR, VIEWPORT_WIDTH, VIEWPORT_HEIGHT
+from locator import extract_all_frames, infer_labels, DATA_DIR, VIEWPORT_WIDTH, VIEWPORT_HEIGHT
 from introspect import resolve_click_target, resolve_typing_target
 from matching import find_live_candidate, describe_candidates, secret_ref_for_label
 from browser_actions import click_and_wait
@@ -134,6 +134,26 @@ class DiscoverySession:
             {"type": "text", "text": describe_candidates(results)},
         ]
 
+    def _append_step(self, action, comment, target=None, value=None, secret_ref=None, matched_candidate=None, **extra):
+        """Common to every recorded step: assigns the next step number,
+        appends the step dict (same shape every time, regardless of action,
+        so replay never has to guess which keys are present), and -- when a
+        real candidate was matched -- stashes its full detail in the debug
+        file (see run_discovery). Returns the step number."""
+        step_number = len(self.recorded_steps) + 1
+        self.recorded_steps.append({
+            "step": step_number,
+            "comment": comment,
+            "action": action,
+            "value": value,
+            "secret_ref": secret_ref,
+            "target": target,
+            **extra,
+        })
+        if matched_candidate is not None:
+            self.debug_steps.append({"step": step_number, "matched_candidate": redact_candidate(matched_candidate)})
+        return step_number
+
     def record_step(self, action, frame_index, local_candidate_id, value=None):
         candidate = find_candidate_by_id(self.current_results, frame_index, local_candidate_id)
         label = candidate["inferred_label"]
@@ -148,25 +168,11 @@ class DiscoverySession:
         secret_ref = secret_ref_for_label(label) if is_secret else None
         stored_value = None if is_secret else value
 
-        step_number = len(self.recorded_steps) + 1
-        self.recorded_steps.append({
-            "step": step_number,
-            "comment": describe_step(action, stored_value, label, secret_ref),
-            "action": action,
-            "value": stored_value,
-            "secret_ref": secret_ref,
-            "target": {
-                "label": label,
-                "tag": candidate["tag"],
-                "type": candidate["type"],
-            },
-        })
-        # Everything else about the match (score, geometry, which frame, the
-        # runner-up candidates) is our locator heuristic's own scratch-work --
-        # useful for debugging the heuristic, irrelevant to what the capability
-        # does or to replaying it, so it's kept out of the main artifact and
-        # written to a separate debug file instead (see run_discovery).
-        self.debug_steps.append({"step": step_number, "matched_candidate": redact_candidate(candidate)})
+        self._append_step(
+            action, describe_step(action, stored_value, label, secret_ref),
+            target={"label": label, "tag": candidate["tag"], "type": candidate["type"]},
+            value=stored_value, secret_ref=secret_ref, matched_candidate=candidate,
+        )
 
         detail = f"[secret: {secret_ref}]" if secret_ref else (f" = {stored_value!r}" if stored_value else "")
         print(f"  recorded: {action} on \"{label}\" {detail}".rstrip())
@@ -189,17 +195,11 @@ class DiscoverySession:
         value = live["own_text"]
         self.outputs[output_key] = value
 
-        step_number = len(self.recorded_steps) + 1
-        self.recorded_steps.append({
-            "step": step_number,
-            "comment": f'Read "{expected_label}" as {output_key}',
-            "action": "read",
-            "value": None,
-            "secret_ref": None,
-            "output_key": output_key,
-            "target": {"label": expected_label, "tag": "text", "type": None},
-        })
-        self.debug_steps.append({"step": step_number, "matched_candidate": redact_candidate(live)})
+        self._append_step(
+            "read", f'Read "{expected_label}" as {output_key}',
+            target={"label": expected_label, "tag": "text", "type": None},
+            matched_candidate=live, output_key=output_key,
+        )
 
         print(f'  read: "{expected_label}" = {value!r} (output_key={output_key})')
         return value
@@ -211,17 +211,7 @@ class DiscoverySession:
         reproduces the exact same wait, instead of racing content that only
         the LLM noticed wasn't ready yet."""
         self.page.wait_for_timeout(seconds * 1000)
-
-        step_number = len(self.recorded_steps) + 1
-        self.recorded_steps.append({
-            "step": step_number,
-            "comment": f"Wait {seconds}s for the page to settle",
-            "action": "wait",
-            "value": None,
-            "secret_ref": None,
-            "seconds": seconds,
-            "target": None,
-        })
+        self._append_step("wait", f"Wait {seconds}s for the page to settle", seconds=seconds)
         print(f"  recorded: wait {seconds}s")
 
     def resolve_candidate(self, match, error_message):

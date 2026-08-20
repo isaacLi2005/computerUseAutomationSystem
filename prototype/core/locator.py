@@ -1,9 +1,13 @@
 """
-Prototype 1: text + geometry locator/labeling checker.
+Text + geometry locator/labeling core, shared by discovery.py and replay.py --
+this is what both re-locating a candidate on replay and matching a live agent
+action back to a candidate ultimately rest on. Started as a standalone
+feasibility test for the deterministic-replay locator strategy (see
+verification/ for that original, decoupled validation), but the same
+extraction/labeling logic is now load-bearing for the whole pipeline.
 
-Feasibility test for the deterministic-replay locator strategy, decoupled from the
-LLM agent loop. Deliberately avoids any DOM-tree relationship signal (parent/child/
-sibling, id/class matching, <label for>) — the only inputs are:
+Deliberately avoids any DOM-tree relationship signal (parent/child/sibling,
+id/class matching, <label for>) — the only inputs are:
   - each interactive control's own rendered bounding box + own type,
   - every selectable text run's rendered bounding box,
   - the geometric relationship between the two.
@@ -22,7 +26,9 @@ depth, so no manual offset math is needed). Matching (score_candidate) is
 entirely unaware that frames exist -- it just sees already-consistent global
 rects.
 
-Run (from prototype/): .venv/bin/python core/locator_prototype.py [URL] [output_filename]
+Standalone CLI, for eyeballing raw extraction/labeling output without running
+the full discovery/replay pipeline (run from prototype/):
+    .venv/bin/python core/locator.py [URL] [output_filename]
 """
 
 import json
@@ -171,33 +177,38 @@ def score_candidate(elem: Rect, text: Rect):
     return euclidean * DIRECTION_WEIGHT["diagonal"], "diagonal"
 
 
+def _rank_label_candidates(rect, text_rects, skip_index=None, seed=None):
+    """Scores every entry in text_rects as a potential label for `rect`
+    (skipping skip_index, if given, so a text run never labels itself), plus
+    an optional pre-scored `seed` entry (e.g. a control's own rendered text,
+    which competes at distance 0 rather than being geometrically scored).
+    Returns (top_3, best-or-None)."""
+    scored = [seed] if seed else []
+    for j, (text_value, text_rect) in enumerate(text_rects):
+        if j == skip_index:
+            continue
+        score, direction = score_candidate(rect, text_rect)
+        scored.append({"text": text_value, "score": round(score, 1), "direction": direction})
+    scored.sort(key=lambda c: c["score"])
+    top = scored[:3]
+    best = top[0] if top and top[0]["score"] <= MAX_SCORE else None
+    return top, best
+
+
 def infer_labels(elements, texts):
     text_rects = [(t["text"], Rect(**t["rect"])) for t in texts]
     results = []
 
     for el in elements:
         elem_rect = Rect(**el["rect"])
-        scored = []
 
         # Native form controls (input[type=submit/button], <button>) render their
         # own value/innerText through widget chrome, not as a DOM text node, so
         # the TreeWalker scan below can never see it. When present, it fully
         # overlaps the control itself and is the strongest possible signal --
         # stronger than any external text -- so seed it at distance 0.
-        if el["own_text"]:
-            scored.append({"text": el["own_text"], "score": 0.0, "direction": "own_text"})
-
-        for text_value, text_rect in text_rects:
-            score, direction = score_candidate(elem_rect, text_rect)
-            scored.append({
-                "text": text_value,
-                "score": round(score, 1),
-                "direction": direction,
-            })
-        scored.sort(key=lambda c: c["score"])
-        top = scored[:3]
-
-        best = top[0] if top and top[0]["score"] <= MAX_SCORE else None
+        seed = {"text": el["own_text"], "score": 0.0, "direction": "own_text"} if el["own_text"] else None
+        top, best = _rank_label_candidates(elem_rect, text_rects, seed=seed)
 
         results.append({
             "tag": el["tag"],
@@ -223,15 +234,7 @@ def infer_labels(elements, texts):
     # content (e.g. an account balance figure) the same way they already
     # point at interactive controls, instead of only using text to label them.
     for i, (value, rect) in enumerate(text_rects):
-        scored = []
-        for j, (other_value, other_rect) in enumerate(text_rects):
-            if j == i:
-                continue
-            score, direction = score_candidate(rect, other_rect)
-            scored.append({"text": other_value, "score": round(score, 1), "direction": direction})
-        scored.sort(key=lambda c: c["score"])
-        top = scored[:3]
-        best = top[0] if top and top[0]["score"] <= MAX_SCORE else None
+        top, best = _rank_label_candidates(rect, text_rects, skip_index=i)
 
         results.append({
             "tag": "text",

@@ -11,7 +11,7 @@ agent touched something our extractor never found -- a genuine coverage gap
 in the deterministic side. Matching a raw hit against the candidate list uses
 the browser's own `.closest('[data-cua-id]')` -- the standard DOM
 "walk up to the nearest matching ancestor" call -- rather than any custom
-tree-walking code of ours, since locator_prototype.py already tags every
+tree-walking code of ours, since locator.py already tags every
 candidate element with a data-cua-id attribute at extraction time.
 
 Frame handling: a click point is given in top-page (screenshot) coordinates.
@@ -23,7 +23,7 @@ extraction, so a click resolves correctly no matter how deeply nested the
 target frame is.
 """
 
-from locator_prototype import frame_offset
+from locator import frame_offset
 
 
 CLOSEST_CANDIDATE_JS = """

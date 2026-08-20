@@ -21,7 +21,7 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from playwright.sync_api import sync_playwright
 
-from locator_prototype import extract_all_frames, infer_labels, DATA_DIR, VIEWPORT_WIDTH, VIEWPORT_HEIGHT
+from locator import extract_all_frames, infer_labels, DATA_DIR, VIEWPORT_WIDTH, VIEWPORT_HEIGHT
 from matching import find_live_candidate
 from browser_actions import click_and_wait
 from guardrails import mentions_money_movement
