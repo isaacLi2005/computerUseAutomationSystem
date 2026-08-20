@@ -21,7 +21,7 @@ with sync_playwright() as p:
     page.goto(TARGET_URL, wait_until="networkidle")
     page.screenshot(path=str(HERE / "verify_raw.png"), full_page=True)
 
-    # re-extract to get exact rects tied to this same run (same selector as locator_prototype.py)
+    # re-extract to get exact rects tied to this same run (same selector as locator.py)
     data = page.evaluate("""
     () => {
       const out = [];
