@@ -2,300 +2,237 @@
 
 ## 1. Architecture
 
-A single synchronous Python process driving Playwright (Chromium, headless) against
-ParaBank — a public, server-rendered banking demo with `<frameset>`/`<frame>` nesting,
-table layout, and no test IDs. A real stand-in for "legacy web app," not a convenient one.
+We implement a Python process using Playwright and headless Chromium browsers.
+We test against ParaBank (https://github.com/parasoft/parabank), a mock demonstration
+of the UI for a bank created by the company Parasoft for testing purposes. Note that
+we run ParaBank's code locally on Docker for simplicity, since the public demo server
+proved unreliable during development.
 
-**Why Playwright:** it exposes both a real DOM-evaluation API (needed for the
-geometry extraction this system is built around) and first-class multi-frame support
-with correct cross-frame coordinate compositing out of the box — verified empirically
-early on, since a classic `<frameset>` app is exactly the case a naive
-screenshot-coordinate-only tool (a bare CUA/agent SDK, OS-level automation) would
-struggle to ground back to a specific frame's DOM. Selenium/Puppeteer offer similar
-DOM access but weaker first-class frame ergonomics for this specific composition step.
-**Why Claude (`claude-sonnet-4-5`) with the `computer` tool:** native computer-use
-tool support (screenshot in, click/type/wait actions out) meant no custom
-action-parsing layer was needed between model output and browser actions, leaving
-that effort for the part that actually differentiates this system — the deterministic
-locator/replay layer, not the agent loop itself.
+**Playwright.** Playwright is a tool made to automate browsers. It launches and
+controls a real browser instance, and gives direct access to the page's structure and
+content, which is what lets us detect elements and take actions on them
+programmatically.
 
-Central decision: **one locator module (`locator.py`) is the single source of truth
-for what exists on a page, used identically by the LLM's action-checking during
-discovery and by label-based re-matching during replay.** It extracts every
-interactive control and every visible text run — including inside nested frames,
-composited into top-page coordinates via Playwright's own frame geometry — and infers
-each control's label purely from geometry (nearest text, direction-weighted: left/above
-trusted more than right/below, matching how both legacy table forms and modern stacked
-forms render). No DOM-tree signal (parent/child, id/class, `<label for>`) is used
-anywhere: a legacy app can fail to have clean markup, but it can't fail to render a
-control and its label at real pixel positions. That's the one signal a human operator
-is guaranteed to have.
+**Claude.** We use `claude-sonnet-4-5` with the `computer` tool. This was chosen as a
+general LLM with sufficient capabilities, and also since we already had a Claude
+subscription prior to this project. 
 
-Discovery gives the LLM an unfiltered real screenshot and lets it click/type anywhere
-a human could — never constrained to the deterministic candidate list. But every
-action is checked against that list immediately after (`introspect.py` resolves the
-raw coordinate/focus back to a candidate via `el.closest('[data-cua-id]')`). An
-unmatched action is a genuine coverage gap, and discovery stops hard rather than
-silently recording an unreplayable step. Replay never touches raw coordinates — it
-re-locates every step by `(label, tag, type)` on a fresh candidate list.
+The central design for this system may be found in `locator.py`. We extract all of the
+text, input textboxes, and buttons that exist on a page so that they may be presented
+to the agent as it conducts its workflow. The agent can then match the actions it takes
+against these extracted elements. These actions are then recorded as a sequence of
+steps, forming a reusable artifact that can be replayed later without the agent.
 
-Files: `locator.py` (extraction/labeling), `introspect.py` (raw-action → candidate,
-discovery only), `matching.py` (label re-matching + shared utilities),
-`browser_actions.py` (shared click+navigation-wait), `guardrails.py` (domain lock +
-money gate), `escalation.py` (human-in-the-loop loop, shared), `discovery.py` (LLM
-loop, artifact writer), `replay.py` (deterministic executor).
+The motivation behind this design was making sure we assumed nothing more than what
+we had from first principles: the browser that a human operates some UI with must
+have some way of marking what can receive text input and what a human can click. By
+gathering all of these elements, we create a straightforward way of letting the agent
+specify exactly what it interacted with.
 
-**Trade-off:** single process, no service boundaries, no queue. The assignment is
-explicit that scaling infrastructure isn't rewarded prematurely, and the real
-production split (discovery as a rare, human-supervised job; replay as a call the
-agent-facing product invokes per request) is a natural evolution of this shape, not a
-redesign.
-
-One genuine simplification found by reconsidering, not assumed upfront: discovery
-needs introspection to interpret a raw agent coordinate; replay clicks a known
-candidate directly. But during escalation, a human always picks a candidate by its
-known index, never a raw coordinate — so escalation shares one implementation for
-both callers with no duplication.
+A clear failure case is a page where all the text is rendered as an image, which
+would leave nothing for this method to select as elements. Given that this would
+be unlikely, and would force us toward a more complex vision model that's harder
+to keep deterministic, we felt our assumption that everything necessary
+appears as text was still safe.
 
 ## 2. Artifact schema
 
-```json
-{
-  "name": "log_in_with_and_password", "version": 1,
-  "goal": "Log in with username 'john' and password 'demo', ...",
-  "final_status": {"success": true, "notes": "..."}, "failure": null,
-  "steps": [
-    {"step": 1, "comment": "Click \"Username\"", "action": "click",
-     "value": null, "secret_ref": null,
-     "target": {"label": "Username", "tag": "input", "type": "text"}},
-    {"step": 4, "comment": "Insert (secret: SECRET_PASSWORD) into Password",
-     "action": "type", "value": null, "secret_ref": "SECRET_PASSWORD",
-     "target": {"label": "Password", "tag": "input", "type": "password"}},
-    {"step": 8, "comment": "Read \"Balance:\" as balance", "action": "read",
-     "output_key": "balance",
-     "target": {"label": "Balance:", "tag": "text", "type": null}}
-  ],
-  "checkpoints": [{"after_step": 5, "expected_label": "Welcome",
-                    "reason": "confirms login succeeded", "held": true}],
-  "escalations": [], "outputs": {"balance": "-$2423.00"}
-}
-```
+Top level:
 
-- **Targets are `(label, tag, type)`, never coordinates or DOM selectors.** Coordinates
-  aren't stable across a fresh load; selectors/ids aren't reliable on markup a legacy
-  vendor never designed for automation. A geometry-inferred label tolerates the drift
-  enterprise UIs actually have while correctly refusing to guess when the label itself
-  changes — that routes to escalation instead of a wrong click.
-- **Secrets are never stored, not even redacted to a placeholder** (a placeholder can't
-  be replayed — it would type the literal placeholder). A password step stores
-  `secret_ref: "SECRET_PASSWORD"`, deterministically derived from the field's label;
-  replay resolves the real value from `.env` only at replay time.
-- **Outputs store what to read, not what was read.** A `read` step's target identifies
-  *where* the value lives; replay re-reads the live value every time, so a balance
-  that legitimately changed between runs isn't treated as drift.
-- **`comment` is deterministic, not LLM-authored** — reviewability shouldn't depend on
-  trusting model prose for what actually happened. `checkpoints[].reason` *is*
-  LLM-authored (captured once, at record time), since that's the model's own
-  justification for believing it reached the right state — worth preserving verbatim.
-- **`name` is slugified from the goal**, stripping quoted literals first (`'john'`) so
+- `name` — derived from the goal text by slugifying it (lowercasing it, joining
+  words with underscores), with quoted literals stripped out first so specific
   parameters don't leak into the capability's identity.
-- **Full locator debug detail lives in a paired `_debug.json`**, not the main
-  artifact — useful for debugging the heuristic, irrelevant to what the capability
-  does. Keeps the main artifact the thing a human or agent should actually read.
-- **Typed input parameters are scoped to secrets only**, deliberately (see Cuts).
+- `version` — an integer, for tracking schema changes over time.
+- `goal` — the original goal text the agent was given.
+- `final_status` — the agent's own report of whether it succeeded, and why.
+- `failure` — what went wrong, if the run didn't complete.
+- `steps` — the ordered list of recorded actions.
+- `checkpoints` — states the agent confirmed it reached along the way.
+- `escalations` — a record of any human intervention.
+- `outputs` — the values produced by any `read` steps, keyed by name.
+
+Each step:
+
+- `step` — its position in the sequence.
+- `comment` — a deterministic, human-readable description of the step, generated by
+  our own code rather than written by the model, so reviewability doesn't depend on
+  trusting model-generated prose.
+- `action` — one of `click`, `type`, `read`, or `wait`.
+- `target` — a label, a tag, and a type identifying what to act on, extracted
+  deterministically by `src/core/locator.py` (absent for `wait`, which has nothing
+  to act on). We use this instead of a screen coordinate or DOM selector, since we
+  look an element up again by what it is rather than where it used to be, which
+  gives us resilience to slightly changed coordinates.
+- `value` — the text typed, for a `type` step; unused otherwise.
+- `secret_ref` — the name of an environment variable, if this step types a secret.
+  Secrets are never written to the artifact directly, not even as a placeholder,
+  since a placeholder can't actually be replayed.
+- `output_key` — present only on `read` steps, naming the value in `outputs`. A
+  `read` step records what to read, not what was read: it stores that a balance is
+  found next to the label "Balance:", not the dollar amount we saw when we recorded
+  it, so a value that legitimately changes between runs isn't treated as something
+  broken.
+- `seconds` — present only on `wait` steps.
+
+Each checkpoint: `after_step`, `expected_label`, `reason` (the model's own
+justification for expecting this state — the one place we keep the model's own
+words in the artifact), and `held` (whether it actually did).
+
+Each escalation: `reason`, a `screenshot`, the `human_actions` taken, and the
+`outcome` (`done` or `skip`).
+
+Full debug detail — the exact pixel position of a match, its label score, and which
+other candidates were considered and rejected — is kept in a separate paired file
+rather than the main artifact, since that's useful for debugging our locator but not
+for understanding what the capability does.
+
+Parameterizing was not yet implemented; see Cuts. 
 
 ## 3. Determinism & error handling
 
-Replay makes zero LLM calls. Every step re-locates via `find_live_candidate(fresh,
-label, tag, type)` — exact label match, falling back to a control's own rendered text
-(covers a button/link whose own text is its label, if nearby text shifted the
-inferred label without the control's own text changing). No fuzzy matching: a miss is
-always a clean "not found," never a guess.
+Replay is the process of re-running a saved artifact against a live page, without an
+agent, by reproducing its recorded steps. Replay makes no LLM calls. Each step
+re-locates its target by label, falling back to the element's own rendered text if
+the label doesn't match; this covers cases like a button whose own text is
+effectively its label.
 
-**Timing** is handled two ways, not blanket sleeps. Every click waits out a possible
-navigation (bounded 3s, timing out harmlessly for non-navigating clicks). Separately,
-a `wait` the LLM took during discovery is recorded as its own step and replayed
-verbatim — found necessary empirically: ParaBank's account table loads after login
-completes, the LLM noticed and waited, but that wait wasn't originally captured, so
-replay raced content the LLM had already learned to wait for. Recording it turns a
-one-time observation into a permanent fix, rather than guessing with a retry loop.
+Timing is handled in two ways. Every click waits for a possible navigation to finish,
+since a plain click doesn't wait on its own. Separately, if the agent explicitly
+waited for something to load during discovery, that wait is recorded and replayed the
+same way. We found this necessary in practice: ParaBank's account table loads after
+login completes, and if the agent didn't happen to wait for it, replay would run fast
+enough to race past it.
 
-**Recoverable conditions route to a human, not automatic retry** — this is regulated
-financial data behind a legacy UI; blindly retrying a failed step (e.g. resubmitting
-after a validation error) risks compounding the mistake more than it risks a slow
-recovery. The recorded `wait` is the one exception, since it isn't a guess — it's
-exact reproduction of a decision already made once.
+We attempt to distinguish failure from business outcomes. When an outcome is represented 
+by a value at a stable location on the page (a
+status of Approved or Denied, for example), reading that value works regardless of
+which outcome occurred, since we never assert what the value should be, only that the
+field exists. We tested this directly against ParaBank's loan feature and confirmed
+it holds for either outcome.
 
-**Business outcome vs. hard failure — tested, not just designed.** For the common case — one stable field whose
-*value* varies across legitimate outcomes (a status of Approved/Denied, a balance,
-"no such member") — the existing `read` mechanism already solves this with no new
-schema field: `read_value` re-locates a target by its stable *label*, then reports
-whatever value is currently there, so replay never asserts one specific expected
-answer and therefore never fails just because the answer differs. Proven directly
-against ParaBank's loan feature (`Status: Approved`/`Denied`): the recorded artifact
-targets label `"Status:"`, and `find_live_candidate` (the exact function replay uses)
-resolves it correctly against *either* live outcome.
+One gap is if the outcome involves the absence of a result — for example, an empty
+search result with no labeled field to point to. That would need a separate
+mechanism: a list of known alternate outcomes, checked before escalating rather than
+instead of it. We didn't build this.
 
-This surfaced a real failure mode worth documenting, not just a hypothetical one:
-the first attempt at this demo had the LLM call `read_value` with
-`expected_label="Denied"` — the observed *value* — instead of `"Status:"`, the
-label. It worked anyway, by luck (the `own_text` fallback matched the value to
-itself), which is exactly how this class of bug hides right up until the outcome
-changes — replayed against an Approved page, that recording would raise
-`ReplayError` and escalate a perfectly legitimate answer as if something had broken.
-Confirmed directly against a live Approved-outcome page during development.
-Fixed by strengthening `read_value`'s tool description to explicitly warn against
-anchoring to the value instead of the label; the next run picked the correct label
-unprompted.
-
-What this *doesn't* solve: outcomes with no stable field to read at all — e.g.
-ParaBank's transaction search, where "not found" is just an empty results table, no
-distinctive label anywhere. That still needs
-new machinery: a `business_outcome` status alongside `success`/`failure`, checked
-against a small editable per-capability pattern list (same shape as
-`MONEY_KEYWORDS`) before escalating, not instead of it — genuinely not built, unlike
-the case above.
-
-Every failure carries the step, action, expected label/tag, and — via the escalation
-record — what a human actually saw and did about it. Never a bare stack trace.
+Every failure we do report includes the step, the action, and what was expected
+versus what was found, along with a record of what a human did about it if one got
+involved.
 
 ## 4. Heterogeneity & multi-tenant
 
-**Surface abstraction.** The seam already exists and is exercised: everything above
-`locator.py` operates only on the candidate shape it produces (`{tag, type, rect,
-own_text, inferred_label, frame_index, local_candidate_id}`), never on a raw DOM API
-directly — `score_candidate`/`infer_labels` are pure geometry over `(rect, text)`
-pairs. Extending to desktop means a new extraction backend (an accessibility-tree
-walker producing the same candidate shape from each control's role, rect, and own
-text) behind the same `extract_all_frames(page) -> (elements, texts)` contract, plus
-OS-automation click/type behind the same `click_and_wait` contract. Scoring, labeling,
-matching, and replay need zero changes. Legacy web isn't a future extension at all —
-frame-awareness, geometry-only labeling, and zero test-ID dependency are what this
-system is already built around.
+Everything above `locator.py` works off of a plain description of each element — its
+tag, type, position, and text — and never touches the DOM directly. Extending this to
+a desktop application would mean writing a new extraction step that produces the same
+kind of description from an accessibility tree instead of a browser page, along with
+OS-level equivalents for clicking and typing. Nothing above that layer would need to
+change. This isn't hypothetical for legacy web specifically — the frame-awareness and
+lack of dependence on clean markup or test IDs are already what this system is built
+around.
 
-**Multi-tenant reuse.** Because targeting is `(label text, tag, type)` rather than a
-tenant-specific selector or URL, an artifact recorded against one tenant's install of
-a vendor product replays against another tenant's install of the same product as long
-as field labels and control types match — which typically survives per-tenant
-branding/config changes even when markup doesn't. The one genuinely per-tenant piece,
-the target URL, is already factored out of the artifact and supplied at
-replay-invocation time; the domain guardrail derives its allowlist from that
-parameter, never from anything baked into the recording. For real divergence, the
-design (not built — no second tenant target exists to demonstrate it) is an
-`{artifact_name}.{tenant_id}.json` override that patches specific steps' `target.label`
-or substitutes a value, merged over the base artifact before replay starts — the base
-representation was chosen so this override needs no schema change.
+For reuse across tenants, targeting by label rather than by URL or selector already
+helps: an artifact recorded against one tenant's install of a vendor product should
+replay correctly against another tenant's install of the same product, as long as the
+labels and control types match, which is usually true even when branding differs. The
+target URL itself is already a parameter passed in at replay time rather than
+something baked into the artifact.
 
-**Drift detection**, similarly designed but not built: track, per replay, how often a
-step needed the `own_text` fallback instead of an exact match, and how often a step
-needed escalation. A rising rate for a given artifact is the drift signal — it would
-gate that artifact from "approved" back to "needs review" rather than silently
-degrading in production.
+Where a tenant's version diverges enough that labels genuinely differ, we'd want a
+small override file per tenant that patches specific steps, layered on top of the
+base artifact. We didn't build this, since we only had one target to test against.
+
+Detecting drift across tenants or over time is also not built. The idea would be to
+track how often replay needed a fallback match instead of an exact one, or how often
+it needed a human to step in, and treat a rising rate as a signal that an artifact
+needs review.
 
 ## 5. Escalation & handoff
 
-**Detecting stuck** has three triggers: the discovery LLM calling
-`report_goal_status(success=false)`, discovery exhausting its turn budget, and replay
-raising a `ReplayError` (target not found, secret missing, checkpoint failed).
+The system escalates to a human in three situations: the agent itself reports that
+it's stuck, the agent runs out of turns without finishing, or replay can't find
+something it expects and gives up.
 
-**Taking control** is literal: `run_escalation` operates on the exact same Playwright
-`page` the automation was just driving — nothing torn down or reloaded — so the human
-acts on the real, already-authenticated state.
+When this happens, we hand control to a human on the same live browser session, not a
+fresh one, so nothing about the current state is lost. The human sees a screenshot
+with each clickable element numbered directly on the image, along with the same
+numbered list of elements the agent itself works from, so there's nothing new to
+learn.
 
-**Who's in control is a structural guarantee, not a flag:** because everything is one
-synchronous process, while a human is being prompted, the calling loop is simply
-paused mid-call. Only one side can ever issue browser commands, enforced by call-stack
-position rather than a lock that could be gotten wrong.
+Only one side is ever acting on the browser at a time. Since everything runs as a
+single synchronous process, whichever side isn't currently prompting a human is
+simply paused, which makes "who's in control" a property of the code rather than
+something we have to track separately.
 
-**Context on handoff:** a screenshot labeled with each clickable candidate's index
-number drawn directly on the image, plus the full candidate list written to a paired
-text file (kept out of the terminal, which would otherwise bury the actual prompt
-under dozens of lines) — the same numbered list the agent itself reasons over, so
-there's no separate operator vocabulary to learn.
+The human interacts through the terminal: an index to click, an index and a value to
+type into it, or `done`/`skip` to resume or give up. Commands are queued rather than
+run immediately, so nothing touches the page until the human says `done` — we changed
+this after testing showed that running each line immediately, while a human was still
+typing several in a row, was confusing.
 
-**The human's interface is the terminal itself** — no separate operator console, per
-the assignment's explicit allowance to mock that surface. Commands: `<index>` (click),
-`<index> <value>` (click+type), `done`, `skip`. After live testing showed rapid
-multi-line input was confusing (actions executing immediately per line, interleaving
-with delayed output), this became queue-then-execute: nothing touches the page until
-`done`; each line queues an action against the candidate list as it looked when
-escalation started. Documented trade-off: queued indices can go stale if an earlier
-queued action itself changes the page.
+When a human resolves the problem, the calling process picks back up from where it
+left off. One limitation we found here: if the step that failed had a wait recorded
+right after it, resuming manually skips that wait, since only the failed step itself
+is replayed by the human. This can occasionally cause a second escalation immediately
+after the first is resolved.
 
-**Handing back:** `done` resumes the same calling loop — discovery gets a fresh
-observation and continues; replay resumes at the *next* recorded step. Known
-limitation, found empirically: if the failed step's own recorded follow-up (e.g. a
-`wait`) would normally run next, a human's manual recovery skips it, occasionally
-cascading into a second escalation. `skip` is a clean terminal failure instead.
-
-Guardrails apply identically to human-queued actions — escalation can't bypass what
-the agent itself is bound by. Every escalation is recorded into `escalations[]`:
-reason, screenshot, exact human actions, outcome — a full audit trail.
+Every escalation, whether during discovery or replay, is recorded with its reason, a
+screenshot, and exactly what the human did.
 
 ## 6. Safety
 
-**Domain allowlist:** derived from the target URL at invocation, not hardcoded —
-checked after every click, agent- or human-driven, hard-stopping the instant the page
-navigates outside it.
+We enforce a domain allowlist derived from the target URL, checked after every
+action, whether taken by the agent or a human. If the page ever navigates outside the
+allowed domain, we stop.
 
-**Action-type allowlist** is structural rather than a separate config: `click`,
-`type`, `read`, and `wait` are the only actions either the LLM's `computer` tool or
-replay's step executor can ever perform — there is no code path to execute anything
-else, so nothing else needs its own permission check.
+We also only ever allow four kinds of actions — click, type, read, and wait — so
+there's no separate list of permitted action types to maintain. Combined with the
+domain allowlist, this is what enforces safety.
 
-**Money-movement gate**, two layers: if the goal never authorized a money-flavored
-action (checked against an editable `MONEY_KEYWORDS` list — `transfer`, `withdraw`,
-`deposit`, `pay`, `loan` — against the goal text or the candidate's label), that
-action is blocked outright, no prompt. If the goal did authorize it, that's necessary
-but never sufficient — a live human still approves the specific action with `y`/`N`
-every time it's about to execute, not once via the goal text upfront. Reversible
-actions (clicks, reads, navigation) proceed autonomously; anything that looks
-irreversible always requires live approval, regardless of what the goal said.
+A list of keywords detects if an action would involve money. If the goal never mentioned money movement,
+any action that matches this list is blocked outright. If the goal did authorize it,
+we still don't allow it silently — a human has to approve that specific action every
+time it's about to run, not just once at the start.
 
-**Secrets:** never written to any artifact or log, not even redacted — a password
-field's value becomes a deterministic environment-variable reference, resolved from
-`.env` only at replay time. `.env` is gitignored and confirmed never committed.
-Session identifiers (`jsessionid` in a captured URL) are stripped from the debug file
-the same way, on the reasoning that a session token is a bearer credential exactly
-like a password.
-
-**What's not covered, honestly:** general PII redaction beyond secrets and session
-tokens isn't built. A `read` value or typed field could in principle contain an SSN
-or account number and would currently be written into the artifact/outputs as-is.
-ParaBank's demo data never forced this; production would need field-level
-pattern-classification ahead of writing anything to disk.
+Secrets are never written to disk in any form, not even redacted. A password field's
+value is stored as a reference to an environment variable instead, and the real value
+is only looked up at replay time. Session identifiers embedded in URLs are stripped
+out of our debug logs the same way, since they function as a credential too.
 
 ## 7. Cuts
 
-- **Business-outcome vs. hard-failure for outcomes with no stable field to read.**
-  The common case — a status/value that varies across legitimate outcomes — is
-  solved and proven (`read_value` anchored to a stable label; Section 3). What's
-  still two-state (`success`/`failure`)
-  is the structural case, where the alternate outcome is an *absence* with no label
-  to key on at all (an empty results table, not a "not found" message) — the
-  `business_outcome` status + pattern-list design in Section 3 covers this
-  remaining gap specifically.
-- **General parameterization beyond secrets** (e.g. a typed member ID). Deferred
-  because it requires the discovery LLM to distinguish "per-invocation parameter" from
-  "fixed to this recording" — a real design problem, not a small addition.
-- **JS-only clickable elements** (`<div onclick>` with no native semantics) are
-  invisible to the extractor's element query. A real coverage gap for some legacy
-  patterns, not encountered against ParaBank but plausible elsewhere.
-- **CAPTCHA / 2FA:** no explicit handling. The honest expected behavior is that an
-  unanticipated prompt fails a checkpoint or stalls the agent, both correctly routing
-  to escalation — but never exercised against a real 2FA flow.
-- **Multi-tenant override loading and desktop-surface extraction** are designed
-  (Section 4) but not implemented — no second tenant/variant target exists, and no
-  accessibility-tree backend was written.
-- **Multi-run stability / confidence scoring / approval gating** (optional stretch
-  goals): the natural consumer of the drift signal in Section 4, not built.
-- **Escalation queue staleness**: documented in the prompt itself rather than solved.
-- **Label collision on dense tabular data**: the geometry heuristic can grab a
-  neighboring table row's value instead of the intended one — found empirically while
-  building balance-reading, accepted as a real limitation of a strictly geometry-only,
-  DOM-structure-blind approach.
+We did not build a way to distinguish a business outcome from a failure when the
+outcome has no stable field to read — only when it's a value we can read the way
+described in Determinism & error handling.
 
-**Next, in order:** the structural business-outcome case (absence, not just a
-varying value); general parameterization (the clearest limiter on artifact
-reusability); a second real tenant-variant target, to demonstrate cross-tenant
-reuse rather than only design it.
+We did not build general parameterization beyond secrets. Doing this properly means
+teaching the agent to tell the difference between a value that's fixed to a specific
+recording and a value the caller should supply each time, which is a real design
+problem on its own.
+
+Elements that are clickable only through JavaScript, with no native tag to identify
+them, are invisible to our extractor. We didn't hit this against ParaBank, but it's a
+real gap for other legacy apps.
+
+We have no explicit handling for CAPTCHAs or two-factor authentication. In practice,
+either of these would likely show up as a stuck agent or a failed checkpoint, both of
+which already route to a human — but we never tested this against a real case.
+
+Reusing artifacts across tenants and extending this to a desktop application are both
+designed but not built, since we only had one target to test against.
+
+Ideas like scoring how reliably an artifact replays, or replaying it several times to
+check for flakiness, are natural extensions of the drift-detection idea in
+Heterogeneity & multi-tenant, but we didn't build them.
+
+We also didn't build a way for a human to refresh the candidate list mid-escalation
+if the page changes while they're deciding what to do — this is only documented as a
+risk in the escalation prompt itself.
+
+Finally, our labeling heuristic can occasionally grab the wrong value out of a dense
+table, since it has no sense of table structure, only geometry. We found this while
+testing the balance-reading feature and accepted it as a real limitation of a
+geometry-only approach.
+
+If we had more time, we'd build the business-outcome case above first, then general
+parameterization, then a second tenant target to actually demonstrate reuse instead
+of just describing it.

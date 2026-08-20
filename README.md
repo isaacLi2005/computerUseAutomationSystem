@@ -26,6 +26,20 @@ python3 -m venv .venv
 .venv/bin/playwright install chromium
 ```
 
+**Target site:** the public demo at `https://parabank.parasoft.com` proved unreliable
+during development (intermittent server-side errors — see REPORT.md and
+`evidence/replay_log.txt`), so we also run it locally via Docker:
+
+```bash
+docker run -d --name parabank -p 8080:8080 -p 61616:61616 -p 9001:9001 parasoft/parabank
+```
+
+Once the container's up (`docker logs parabank` should show `Server startup in [...]
+milliseconds`), the app is at `http://localhost:8080/parabank/index.htm`. Substitute
+that for `https://parabank.parasoft.com/parabank/index.htm` in any command below —
+both work identically, since the target URL is always just a parameter, never baked
+into an artifact.
+
 Create `src/.env` (gitignored, never committed) with:
 
 ```
