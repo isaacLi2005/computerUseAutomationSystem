@@ -216,6 +216,40 @@ def infer_labels(elements, texts):
             "top_candidates": top,
         })
 
+    # Every text run is also exposed as a "read" candidate in its own right
+    # (tag == "text"), labeled by whichever OTHER text run sits closest to
+    # it -- the same geometry heuristic as above, just with text runs playing
+    # both roles. This is what lets discovery/replay point at plain page
+    # content (e.g. an account balance figure) the same way they already
+    # point at interactive controls, instead of only using text to label them.
+    for i, (value, rect) in enumerate(text_rects):
+        scored = []
+        for j, (other_value, other_rect) in enumerate(text_rects):
+            if j == i:
+                continue
+            score, direction = score_candidate(rect, other_rect)
+            scored.append({"text": other_value, "score": round(score, 1), "direction": direction})
+        scored.sort(key=lambda c: c["score"])
+        top = scored[:3]
+        best = top[0] if top and top[0]["score"] <= MAX_SCORE else None
+
+        results.append({
+            "tag": "text",
+            "type": None,
+            "id": None,
+            "name": None,
+            "frame_index": texts[i]["frame_index"],
+            "local_candidate_id": i,
+            "rect": texts[i]["rect"],
+            "href": None,
+            "frame_url": texts[i].get("frame_url"),
+            "own_text": value,
+            "inferred_label": best["text"] if best else None,
+            "label_score": best["score"] if best else None,
+            "label_direction": best["direction"] if best else None,
+            "top_candidates": top,
+        })
+
     return results
 
 
@@ -259,6 +293,8 @@ def extract_all_frames(page):
         for t in data["texts"]:
             t["rect"]["x"] += ox
             t["rect"]["y"] += oy
+            t["frame_url"] = frame.url
+            t["frame_index"] = frame_index
             all_texts.append(t)
     return all_elements, all_texts
 

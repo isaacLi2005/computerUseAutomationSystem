@@ -5,7 +5,9 @@ matching.find_live_candidate rather than reusing discovery-time coordinates,
 since a fresh page load won't be pixel-identical. Anything that can't be
 re-located pauses for human escalation (same live session, same mechanism
 discovery.py uses) rather than failing outright -- only becomes a real
-failure if the human can't fix it either.
+failure if the human can't fix it either. "wait" steps are the one exception:
+they have no target to re-locate, and just reproduce a deliberate pause the
+agent took during discovery (e.g. letting async content finish loading).
 
 Run (from prototype/):
     .venv/bin/python core/replay.py [artifact_path] [target_url]
@@ -56,6 +58,14 @@ def resolve_secret_value(secret_ref):
 
 
 def replay_step(page, step):
+    if step["action"] == "wait":
+        # No target to re-locate -- just reproduce the same deliberate wait
+        # the agent took during discovery (see handle_wait), so replay
+        # doesn't race async content the same way it needed to be waited for.
+        page.wait_for_timeout(step["seconds"] * 1000)
+        print(f"  replayed: {step['comment']}")
+        return None
+
     label = step["target"]["label"]
     tag = step["target"]["tag"]
     type_ = step["target"]["type"]
@@ -68,16 +78,24 @@ def replay_step(page, step):
             f"replay -- expected a {tag} labeled \"{label}\"."
         )
 
+    read_value = None
     if step["action"] == "click":
         click_candidate(page, live)
     elif step["action"] == "type":
         value = resolve_secret_value(step["secret_ref"]) if step.get("secret_ref") else step["value"]
         click_candidate(page, live)  # focus it first, don't assume it already has focus
         page.keyboard.type(value)
+    elif step["action"] == "read":
+        # Re-read the live value now, not whatever discovery saw -- that's
+        # the point of a read step (e.g. a balance is expected to change
+        # between runs; only the label identifying it should stay stable).
+        read_value = live["own_text"]
+        print(f"  read: \"{label}\" = {read_value!r}")
     else:
         raise ReplayError(f"step {step['step']}: unknown action {step['action']!r}")
 
     print(f"  replayed: {step['comment']}")
+    return read_value
 
 
 def verify_checkpoint(page, checkpoint):
@@ -107,6 +125,7 @@ def replay(artifact_path, target_url):
         "total_steps": len(steps),
         "failure": None,
         "escalations": [],
+        "outputs": {},
     }
 
     with sync_playwright() as p:
@@ -118,7 +137,9 @@ def replay(artifact_path, target_url):
         while step_index < len(steps):
             step = steps[step_index]
             try:
-                replay_step(page, step)
+                value = replay_step(page, step)
+                if step["action"] == "read":
+                    result["outputs"][step["output_key"]] = value
                 result["steps_completed"] = step["step"]
 
                 checkpoint = checkpoints_by_step.get(step["step"])
@@ -141,6 +162,11 @@ def replay(artifact_path, target_url):
                 step_index += 1  # human resolved it -- move past the failed step
 
         browser.close()
+
+    if result["outputs"]:
+        print("\n  outputs:")
+        for key, value in result["outputs"].items():
+            print(f"    {key} = {value!r}")
 
     DATA_DIR.mkdir(exist_ok=True)
     out_path = DATA_DIR / "replay_run.json"

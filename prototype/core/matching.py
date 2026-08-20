@@ -6,10 +6,11 @@ matching or confidence scoring, so a miss is always a clean "not found"
 rather than a guess.
 
 Also holds two small candidate-list utilities shared by discovery.py and
-escalation.py: describe_candidates (render a candidate list as text) and
-secret_ref_for_label (name the environment variable a secret's real value
-should be supplied under -- see discovery.py's record_step and replay.py's
-replay_step).
+escalation.py: describe_candidates (render a candidate list as text -- for
+tag == "text" candidates, this also shows the current value, since those
+exist to be read, not clicked/typed into) and secret_ref_for_label (name the
+environment variable a secret's real value should be supplied under -- see
+discovery.py's record_step and replay.py's replay_step).
 """
 
 import re
@@ -22,7 +23,10 @@ def describe_candidates(results):
     lines = []
     for i, r in enumerate(results):
         label = r["inferred_label"] or "(no label found)"
-        lines.append(f"{i}. {r['tag']} ({r['type']}) -- \"{label}\"")
+        if r["tag"] == "text":
+            lines.append(f"{i}. text -- \"{label}\": {r['own_text']!r}")
+        else:
+            lines.append(f"{i}. {r['tag']} ({r['type']}) -- \"{label}\"")
     return "Elements the deterministic detector currently sees on this page:\n" + "\n".join(lines)
 
 

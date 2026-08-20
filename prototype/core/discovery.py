@@ -69,9 +69,10 @@ def slugify_goal(goal):
 
 
 def describe_step(action, value, label, secret_ref=None):
-    """Deterministic, human-readable one-liner for a recorded step. Only
-    "click" and "type" ever get recorded (see handle_key), so these two
-    templates cover every case."""
+    """Deterministic, human-readable one-liner for a recorded click/type step
+    (see handle_key for why key presses aren't recorded; handle_read and
+    handle_wait build their own comments directly, since neither has a
+    value/secret_ref in the click/type sense)."""
     if secret_ref:
         return f"Insert (secret: {secret_ref}) into {label}"
     if action == "type":
@@ -105,6 +106,7 @@ class DiscoverySession:
         self.debug_steps = []  # full candidate detail, kept out of the main artifact
         self.checkpoints = []
         self.escalations = []
+        self.outputs = {}  # output_key -> value, from read_value calls
         self.current_results = []  # latest extractor output, refreshed each turn
 
     def refresh_candidates(self):
@@ -168,6 +170,59 @@ class DiscoverySession:
 
         detail = f"[secret: {secret_ref}]" if secret_ref else (f" = {stored_value!r}" if stored_value else "")
         print(f"  recorded: {action} on \"{label}\" {detail}".rstrip())
+
+    def handle_read(self, expected_label, output_key, reason):
+        """Reads the current value of a piece of page content (tag == "text"),
+        the same grounded-observation discipline declare_checkpoint uses: the
+        label must be copied exactly from the candidate list just shown, never
+        assumed or read visually. Unlike a checkpoint, this also captures the
+        value -- into self.outputs (this run's observed value, kept as
+        evidence of what the capability actually returned) and into a
+        recorded "read" step that stores what to read, not what it read, so
+        replay re-reads whatever the live value is then, not this one."""
+        live = find_live_candidate(self.current_results, expected_label, tag="text")
+        if live is None:
+            raise CoverageGapError(
+                f"Agent tried to read \"{expected_label}\" ({reason}) but no text "
+                f"candidate with that label is in the list it was just shown."
+            )
+        value = live["own_text"]
+        self.outputs[output_key] = value
+
+        step_number = len(self.recorded_steps) + 1
+        self.recorded_steps.append({
+            "step": step_number,
+            "comment": f'Read "{expected_label}" as {output_key}',
+            "action": "read",
+            "value": None,
+            "secret_ref": None,
+            "output_key": output_key,
+            "target": {"label": expected_label, "tag": "text", "type": None},
+        })
+        self.debug_steps.append({"step": step_number, "matched_candidate": redact_candidate(live)})
+
+        print(f'  read: "{expected_label}" = {value!r} (output_key={output_key})')
+        return value
+
+    def handle_wait(self, seconds):
+        """Records a deliberate wait the agent took (e.g. after submitting a
+        form, to let async content finish loading before the next
+        screenshot). Recorded the same way any other action is -- so replay
+        reproduces the exact same wait, instead of racing content that only
+        the LLM noticed wasn't ready yet."""
+        self.page.wait_for_timeout(seconds * 1000)
+
+        step_number = len(self.recorded_steps) + 1
+        self.recorded_steps.append({
+            "step": step_number,
+            "comment": f"Wait {seconds}s for the page to settle",
+            "action": "wait",
+            "value": None,
+            "secret_ref": None,
+            "seconds": seconds,
+            "target": None,
+        })
+        print(f"  recorded: wait {seconds}s")
 
     def resolve_candidate(self, match, error_message):
         """Common to every action: turn a resolve_*_target() match into
@@ -287,6 +342,29 @@ TOOLS = [
             "required": ["expected_label", "reason"],
         },
     },
+    {
+        "name": "read_value",
+        "description": (
+            "Reads and reports the current value of a piece of page content -- e.g. an "
+            "account balance -- so it can be returned to whoever asked for it. Only use "
+            "a label copied EXACTLY from a candidate list line whose tag is \"text\" -- "
+            "never a value you read visually or remember. E.g. if the list shows: "
+            "14. text -- \"Balance\": '$1,234.56', pass exactly Balance as expected_label "
+            "-- the actual value is looked up deterministically, not typed in by you."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "expected_label": {
+                    "type": "string",
+                    "description": "The quoted label from a text-tagged candidate list line, not the whole line.",
+                },
+                "output_key": {"type": "string", "description": "A short name for this value, e.g. \"balance\"."},
+                "reason": {"type": "string", "description": "Why this is the value the goal asked for, in plain English."},
+            },
+            "required": ["expected_label", "output_key", "reason"],
+        },
+    },
 ]
 
 
@@ -308,6 +386,10 @@ def run_discovery(target_url, goal, out_name="discovery_run.json"):
             "state you intended, call declare_checkpoint with a label copied exactly from "
             "that list -- this must describe what you actually observe, never what you "
             "expect or assume before looking. "
+            "If the goal asks you to find out or report a value (e.g. a balance), once "
+            "you can see it as a \"text\"-tagged line in the candidate list, call "
+            "read_value with that label and a short output_key naming it, and mention "
+            "the value in your final report_goal_status notes too. "
             "When the goal is complete, or if you get stuck, call report_goal_status."
         )
 
@@ -328,6 +410,11 @@ def run_discovery(target_url, goal, out_name="discovery_run.json"):
             failure = str(e)
             print(f"  DISCOVERY FAILED: {e}")
 
+        if session.outputs:
+            print("\n  outputs:")
+            for key, value in session.outputs.items():
+                print(f"    {key} = {value!r}")
+
         DATA_DIR.mkdir(exist_ok=True)
 
         out_path = DATA_DIR / out_name
@@ -341,6 +428,7 @@ def run_discovery(target_url, goal, out_name="discovery_run.json"):
                 "steps": session.recorded_steps,
                 "checkpoints": session.checkpoints,
                 "escalations": session.escalations,
+                "outputs": session.outputs,
             }, f, indent=2)
         print(f"\nwrote {out_path}")
 
@@ -403,6 +491,14 @@ def run_turns(session, system_prompt):
                             ],
                         })
 
+            elif block.type == "tool_use" and block.name == "read_value":
+                value = session.handle_read(block.input["expected_label"], block.input["output_key"], block.input["reason"])
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": f"Recorded. Current value of \"{block.input['expected_label']}\" is {value!r}.",
+                })
+
             elif block.type == "tool_use" and block.name == "declare_checkpoint":
                 session.handle_checkpoint(block.input["expected_label"], block.input["reason"])
                 tool_results.append({
@@ -428,8 +524,8 @@ def run_turns(session, system_prompt):
                     # Used after an action that triggers a page navigation
                     # (e.g. submitting a login form) so the next screenshot
                     # reflects the new page instead of a half-loaded one.
-                    seconds = block.input.get("duration", 1)
-                    session.page.wait_for_timeout(seconds * 1000)
+                    # Recorded (see handle_wait) so replay waits too.
+                    session.handle_wait(block.input.get("duration", 1))
                 else:
                     tool_results.append({
                         "type": "tool_result",
