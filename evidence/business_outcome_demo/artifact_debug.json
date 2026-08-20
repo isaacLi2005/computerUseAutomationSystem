@@ -1,0 +1,484 @@
+{
+  "steps": [
+    {
+      "step": 1,
+      "matched_candidate": {
+        "tag": "input",
+        "type": "text",
+        "id": null,
+        "name": "username",
+        "frame_index": 0,
+        "local_candidate_id": 8,
+        "rect": {
+          "x": 293.0,
+          "y": 305.0,
+          "width": 146,
+          "height": 18
+        },
+        "href": null,
+        "frame_url": "http://localhost:8080/parabank/index.htm",
+        "own_text": "",
+        "inferred_label": "Username",
+        "label_score": 3.6,
+        "label_direction": "above",
+        "top_candidates": [
+          {
+            "text": "Username",
+            "score": 3.6,
+            "direction": "above"
+          },
+          {
+            "text": "Customer Login",
+            "score": 34.8,
+            "direction": "above"
+          },
+          {
+            "text": "Password",
+            "score": 36.0,
+            "direction": "below"
+          }
+        ]
+      }
+    },
+    {
+      "step": 2,
+      "matched_candidate": {
+        "tag": "input",
+        "type": "text",
+        "id": null,
+        "name": "username",
+        "frame_index": 0,
+        "local_candidate_id": 8,
+        "rect": {
+          "x": 293.0,
+          "y": 305.0,
+          "width": 146,
+          "height": 18
+        },
+        "href": null,
+        "frame_url": "http://localhost:8080/parabank/index.htm",
+        "own_text": "",
+        "inferred_label": "Username",
+        "label_score": 3.6,
+        "label_direction": "above",
+        "top_candidates": [
+          {
+            "text": "Username",
+            "score": 3.6,
+            "direction": "above"
+          },
+          {
+            "text": "Customer Login",
+            "score": 34.8,
+            "direction": "above"
+          },
+          {
+            "text": "Password",
+            "score": 36.0,
+            "direction": "below"
+          }
+        ]
+      }
+    },
+    {
+      "step": 3,
+      "matched_candidate": {
+        "tag": "input",
+        "type": "password",
+        "id": null,
+        "name": "password",
+        "frame_index": 0,
+        "local_candidate_id": 9,
+        "rect": {
+          "x": 293.0,
+          "y": 353.0,
+          "width": 146,
+          "height": 18
+        },
+        "href": null,
+        "frame_url": "http://localhost:8080/parabank/index.htm",
+        "own_text": "",
+        "inferred_label": "Password",
+        "label_score": 3.6,
+        "label_direction": "above",
+        "top_candidates": [
+          {
+            "text": "Password",
+            "score": 3.6,
+            "direction": "above"
+          },
+          {
+            "text": "Username",
+            "score": 61.2,
+            "direction": "above"
+          },
+          {
+            "text": "Customer Login",
+            "score": 92.4,
+            "direction": "above"
+          }
+        ]
+      }
+    },
+    {
+      "step": 4,
+      "matched_candidate": {
+        "tag": "input",
+        "type": "password",
+        "id": null,
+        "name": "password",
+        "frame_index": 0,
+        "local_candidate_id": 9,
+        "rect": {
+          "x": 293.0,
+          "y": 353.0,
+          "width": 146,
+          "height": 18
+        },
+        "href": null,
+        "frame_url": "http://localhost:8080/parabank/index.htm",
+        "own_text": "",
+        "inferred_label": "Password",
+        "label_score": 3.6,
+        "label_direction": "above",
+        "top_candidates": [
+          {
+            "text": "Password",
+            "score": 3.6,
+            "direction": "above"
+          },
+          {
+            "text": "Username",
+            "score": 61.2,
+            "direction": "above"
+          },
+          {
+            "text": "Customer Login",
+            "score": 92.4,
+            "direction": "above"
+          }
+        ]
+      }
+    },
+    {
+      "step": 5,
+      "matched_candidate": {
+        "tag": "input",
+        "type": "submit",
+        "id": null,
+        "name": null,
+        "frame_index": 0,
+        "local_candidate_id": 10,
+        "rect": {
+          "x": 293.0,
+          "y": 382.125,
+          "width": 66.453125,
+          "height": 19
+        },
+        "href": null,
+        "frame_url": "http://localhost:8080/parabank/index.htm",
+        "own_text": "Log In",
+        "inferred_label": "Log In",
+        "label_score": 0.0,
+        "label_direction": "own_text",
+        "top_candidates": [
+          {
+            "text": "Log In",
+            "score": 0.0,
+            "direction": "own_text"
+          },
+          {
+            "text": "Forgot login info?",
+            "score": 36.0,
+            "direction": "below"
+          },
+          {
+            "text": "Password",
+            "score": 38.5,
+            "direction": "above"
+          }
+        ]
+      }
+    },
+    {
+      "step": 6,
+      "matched_candidate": {
+        "tag": "a",
+        "type": null,
+        "id": null,
+        "name": null,
+        "frame_index": 0,
+        "local_candidate_id": 14,
+        "rect": {
+          "x": 293.0,
+          "y": 448.0,
+          "width": 164,
+          "height": 24
+        },
+        "href": "requestloan.htm",
+        "frame_url": "http://localhost:8080/parabank/overview.htm",
+        "own_text": "Request Loan",
+        "inferred_label": "Request Loan",
+        "label_score": 0.0,
+        "label_direction": "own_text",
+        "top_candidates": [
+          {
+            "text": "Request Loan",
+            "score": 0.0,
+            "direction": "own_text"
+          },
+          {
+            "text": "Update Contact Info",
+            "score": 6.0,
+            "direction": "above"
+          },
+          {
+            "text": "Log Out",
+            "score": 12.0,
+            "direction": "below"
+          }
+        ]
+      }
+    },
+    {
+      "step": 7,
+      "matched_candidate": {
+        "tag": "input",
+        "type": "text",
+        "id": "amount",
+        "name": null,
+        "frame_index": 0,
+        "local_candidate_id": 16,
+        "rect": {
+          "x": 650.21875,
+          "y": 323.0,
+          "width": 206,
+          "height": 18
+        },
+        "href": null,
+        "frame_url": "http://localhost:8080/parabank/requestloan.htm",
+        "own_text": "",
+        "inferred_label": "$",
+        "label_score": 5.0,
+        "label_direction": "left",
+        "top_candidates": [
+          {
+            "text": "$",
+            "score": 5.0,
+            "direction": "left"
+          },
+          {
+            "text": "Loan Amount:",
+            "score": 15.8,
+            "direction": "left"
+          },
+          {
+            "text": "Accounts Overview",
+            "score": 234.0,
+            "direction": "left"
+          }
+        ]
+      }
+    },
+    {
+      "step": 8,
+      "matched_candidate": {
+        "tag": "input",
+        "type": "text",
+        "id": "amount",
+        "name": null,
+        "frame_index": 0,
+        "local_candidate_id": 16,
+        "rect": {
+          "x": 650.21875,
+          "y": 323.0,
+          "width": 206,
+          "height": 18
+        },
+        "href": null,
+        "frame_url": "http://localhost:8080/parabank/requestloan.htm",
+        "own_text": "",
+        "inferred_label": "$",
+        "label_score": 5.0,
+        "label_direction": "left",
+        "top_candidates": [
+          {
+            "text": "$",
+            "score": 5.0,
+            "direction": "left"
+          },
+          {
+            "text": "Loan Amount:",
+            "score": 15.8,
+            "direction": "left"
+          },
+          {
+            "text": "Accounts Overview",
+            "score": 234.0,
+            "direction": "left"
+          }
+        ]
+      }
+    },
+    {
+      "step": 9,
+      "matched_candidate": {
+        "tag": "input",
+        "type": "text",
+        "id": "downPayment",
+        "name": null,
+        "frame_index": 0,
+        "local_candidate_id": 17,
+        "rect": {
+          "x": 650.21875,
+          "y": 347.0,
+          "width": 206,
+          "height": 18
+        },
+        "href": null,
+        "frame_url": "http://localhost:8080/parabank/requestloan.htm",
+        "own_text": "",
+        "inferred_label": "$",
+        "label_score": 5.0,
+        "label_direction": "left",
+        "top_candidates": [
+          {
+            "text": "$",
+            "score": 5.0,
+            "direction": "left"
+          },
+          {
+            "text": "Down Payment:",
+            "score": 15.8,
+            "direction": "left"
+          },
+          {
+            "text": "Transfer Funds",
+            "score": 257.5,
+            "direction": "left"
+          }
+        ]
+      }
+    },
+    {
+      "step": 10,
+      "matched_candidate": {
+        "tag": "input",
+        "type": "text",
+        "id": "downPayment",
+        "name": null,
+        "frame_index": 0,
+        "local_candidate_id": 17,
+        "rect": {
+          "x": 650.21875,
+          "y": 347.0,
+          "width": 206,
+          "height": 18
+        },
+        "href": null,
+        "frame_url": "http://localhost:8080/parabank/requestloan.htm",
+        "own_text": "",
+        "inferred_label": "$",
+        "label_score": 5.0,
+        "label_direction": "left",
+        "top_candidates": [
+          {
+            "text": "$",
+            "score": 5.0,
+            "direction": "left"
+          },
+          {
+            "text": "Down Payment:",
+            "score": 15.8,
+            "direction": "left"
+          },
+          {
+            "text": "Transfer Funds",
+            "score": 257.5,
+            "direction": "left"
+          }
+        ]
+      }
+    },
+    {
+      "step": 11,
+      "matched_candidate": {
+        "tag": "input",
+        "type": "button",
+        "id": null,
+        "name": null,
+        "frame_index": 0,
+        "local_candidate_id": 19,
+        "rect": {
+          "x": 650.21875,
+          "y": 395.125,
+          "width": 91.46875,
+          "height": 19
+        },
+        "href": null,
+        "frame_url": "http://localhost:8080/parabank/requestloan.htm",
+        "own_text": "Apply Now",
+        "inferred_label": "Apply Now",
+        "label_score": 0.0,
+        "label_direction": "own_text",
+        "top_candidates": [
+          {
+            "text": "Apply Now",
+            "score": 0.0,
+            "direction": "own_text"
+          },
+          {
+            "text": "Find Transactions",
+            "score": 242.6,
+            "direction": "left"
+          },
+          {
+            "text": "Locations",
+            "score": 359.6,
+            "direction": "below"
+          }
+        ]
+      }
+    },
+    {
+      "step": 12,
+      "matched_candidate": {
+        "tag": "text",
+        "type": null,
+        "id": null,
+        "name": null,
+        "frame_index": 0,
+        "local_candidate_id": 27,
+        "rect": {
+          "x": 622.5,
+          "y": 377.0,
+          "width": 41.203125,
+          "height": 15
+        },
+        "href": null,
+        "frame_url": "http://localhost:8080/parabank/requestloan.htm",
+        "own_text": "Denied",
+        "inferred_label": "Status:",
+        "label_score": 4.0,
+        "label_direction": "left",
+        "top_candidates": [
+          {
+            "text": "Status:",
+            "score": 4.0,
+            "direction": "left"
+          },
+          {
+            "text": "08-19-2026",
+            "score": 9.6,
+            "direction": "above"
+          },
+          {
+            "text": "Wealth Securities Dynamic Loans (WSDL)",
+            "score": 37.2,
+            "direction": "above"
+          }
+        ]
+      }
+    }
+  ]
+}

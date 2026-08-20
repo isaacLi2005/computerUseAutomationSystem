@@ -13,6 +13,7 @@ Run (from src/):
     .venv/bin/python core/replay.py [artifact_path] [target_url]
 """
 
+import hashlib
 import json
 import os
 import sys
@@ -33,6 +34,19 @@ load_dotenv()
 class ReplayError(Exception):
     """A step or checkpoint couldn't be re-located on replay, and escalating
     to a human didn't resolve it either."""
+
+
+def result_filename(artifact_name):
+    """Artifact names come straight from the goal text (see discovery.py's
+    slugify_goal) and can be long enough to exceed the OS's filename length
+    limit on a verbose goal -- cap it and, only when actually truncated,
+    append a short hash of the full name so two long names sharing the same
+    truncated prefix still can't collide."""
+    name = artifact_name or "artifact"
+    if len(name) <= 80:
+        return f"{name}_replay.json"
+    digest = hashlib.sha256(name.encode()).hexdigest()[:8]
+    return f"{name[:80]}_{digest}_replay.json"
 
 
 def get_fresh_candidates(page):
@@ -167,7 +181,7 @@ def replay(artifact_path, target_url):
     # Named after the artifact, not a fixed "replay_run.json" -- otherwise
     # replaying two different artifacts back to back silently overwrites one
     # result with the other.
-    out_path = DATA_DIR / f"{artifact.get('name', 'artifact')}_replay.json"
+    out_path = DATA_DIR / result_filename(artifact.get("name"))
     with open(out_path, "w") as f:
         json.dump(result, f, indent=2)
     print(f"\nwrote {out_path}")

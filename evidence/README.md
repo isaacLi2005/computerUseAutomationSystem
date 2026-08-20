@@ -1,7 +1,10 @@
 # Evidence
 
-Real runs against the live ParaBank demo site, no simulation. Four pieces, each with
-its own console log:
+Real runs against ParaBank, no simulation -- the first four pieces against the
+public demo site, the last against a local Docker instance (`parasoft/parabank`)
+once the public site's own backend became unreliable mid-collection (see
+`replay_error_live_app_error/` below -- that instability is itself part of the
+evidence, not a reason to hide it). Each piece has its own console log:
 
 ## `discovery_run/`
 A complete, successful, LLM-driven discovery run: log in, open the first account,
@@ -51,3 +54,14 @@ replay-many system has to survive — we didn't have to simulate it; it happened
 while collecting evidence, and the system's error-handling and escalation path
 correctly caught it and surfaced full debugging context rather than crashing or
 silently proceeding.
+
+## `business_outcome_demo/`
+A tested answer to the assignment's business-outcome-vs-failure challenge, run
+against a local ParaBank instance (`docker run parasoft/parabank`) once the public
+site's login backend went down entirely. Applies for a loan and reads the resulting
+`Status: Approved`/`Denied` field — two legitimate outcomes, neither a crash — and
+includes direct, live proof that the recorded artifact's target label generalizes
+correctly to *either* outcome, plus a real bug the first attempt caught (the LLM
+initially anchored to the observed value instead of the stable label, which worked
+by luck rather than by correctness) and the fix that followed. See that folder's own
+`README.md` for the full story.

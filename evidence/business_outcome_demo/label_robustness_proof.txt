@@ -1,0 +1,45 @@
+Direct proof that this artifact's recorded read target generalizes across both
+loan outcomes, while a naively-recorded alternative would not.
+
+Both loan attempts below use the SAME live target (http://localhost:8080), the
+same account (12456), varied only by loan amount / down payment to force each
+outcome. In both cases we then ask matching.find_live_candidate() -- the exact
+function replay.py uses to re-locate a step's target -- to resolve two different
+possible recorded labels against the live candidate list:
+
+  "Status:" -- the STABLE label our geometry heuristic actually infers for the
+              outcome text (own_text: 'Denied' or 'Approved'; label_score 4.0,
+              a strong/close match -- see artifact_debug.json).
+  "Denied"  -- what a naive read_value call would record if the LLM (mistakenly)
+              used the VALUE it observed as the label, instead of the label
+              identifying it. This is exactly what happened on our first
+              attempt at this same demo, before we strengthened read_value's
+              tool description (see discovery_console_log.txt's read_value
+              description and REPORT.md's Determinism & error handling section).
+
+--- Denied case (loan amount 5000000, down payment 10) ---
+Loan Request Processed / Status: Denied
+  find_live_candidate(candidates, "Status:", tag="text") -> 'Denied'   (correct)
+  find_live_candidate(candidates, "Denied",  tag="text") -> 'Denied'   (works,
+    but only by lucky coincidence -- own_text fallback matched the value
+    itself, since the label IS the value here)
+
+--- Approved case (loan amount 10, down payment 5) ---
+Loan Request Processed / Status: Approved
+  find_live_candidate(candidates, "Status:", tag="text") -> 'Approved'  (correct
+    -- the artifact actually saved in this folder, artifact.json, uses this
+    label, and would replay correctly against EITHER outcome)
+  find_live_candidate(candidates, "Denied",  tag="text") -> None        (NOT
+    FOUND -- this is exactly the conflation bug: a legitimate "Approved"
+    answer would raise ReplayError and escalate to a human, as if something
+    had broken, when nothing had)
+
+Conclusion: the `read` mechanism (locator.py's text candidates + matching.py's
+find_live_candidate + discovery.py's read_value tool) already avoids the
+business-outcome-vs-failure conflation problem for this whole class of "one
+stable field, multiple legitimate values" scenarios -- but only when the
+recording anchors to the field's stable identifying label, not to whichever
+value happened to be observed at record time. That's not automatic; it depends
+on the caller (the LLM, here) making the right choice, which is why
+read_value's tool description was strengthened (see discovery.py) after this
+exact failure mode was caught live on the first attempt at this demo.

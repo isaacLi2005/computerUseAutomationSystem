@@ -6,6 +6,19 @@ A single synchronous Python process driving Playwright (Chromium, headless) agai
 ParaBank — a public, server-rendered banking demo with `<frameset>`/`<frame>` nesting,
 table layout, and no test IDs. A real stand-in for "legacy web app," not a convenient one.
 
+**Why Playwright:** it exposes both a real DOM-evaluation API (needed for the
+geometry extraction this system is built around) and first-class multi-frame support
+with correct cross-frame coordinate compositing out of the box — verified empirically
+early on, since a classic `<frameset>` app is exactly the case a naive
+screenshot-coordinate-only tool (a bare CUA/agent SDK, OS-level automation) would
+struggle to ground back to a specific frame's DOM. Selenium/Puppeteer offer similar
+DOM access but weaker first-class frame ergonomics for this specific composition step.
+**Why Claude (`claude-sonnet-4-5`) with the `computer` tool:** native computer-use
+tool support (screenshot in, click/type/wait actions out) meant no custom
+action-parsing layer was needed between model output and browser actions, leaving
+that effort for the part that actually differentiates this system — the deterministic
+locator/replay layer, not the agent loop itself.
+
 Central decision: **one locator module (`locator.py`) is the single source of truth
 for what exists on a page, used identically by the LLM's action-checking during
 discovery and by label-based re-matching during replay.** It extracts every
@@ -113,16 +126,36 @@ after a validation error) risks compounding the mistake more than it risks a slo
 recovery. The recorded `wait` is the one exception, since it isn't a guess — it's
 exact reproduction of a decision already made once.
 
-**Business outcome vs. hard failure — the honest current state:** an outcome
-discovery *anticipated* (e.g. a goal like "confirm member 12345 doesn't exist")
-already flows through correctly, since a checkpoint's success condition is whatever
-state discovery recorded as correct — "not found" can be the checkpointed target just
-as validly as "found." What isn't yet separately typed is an *unanticipated*
-deviation: today any unexpected checkpoint/target miss becomes either a resolved
-escalation or a hard failure, with no automatic "known alternate outcome" vs. "real
-break" classification. Next step: a `business_outcome` status alongside
-`success`/`failure`, checked against a small editable per-capability pattern list
-(same shape as `MONEY_KEYWORDS`) before escalating, not instead of it.
+**Business outcome vs. hard failure — tested, not just designed
+(`evidence/business_outcome_demo/`).** For the common case — one stable field whose
+*value* varies across legitimate outcomes (a status of Approved/Denied, a balance,
+"no such member") — the existing `read` mechanism already solves this with no new
+schema field: `read_value` re-locates a target by its stable *label*, then reports
+whatever value is currently there, so replay never asserts one specific expected
+answer and therefore never fails just because the answer differs. Proven directly
+against ParaBank's loan feature (`Status: Approved`/`Denied`): the recorded artifact
+targets label `"Status:"`, and `find_live_candidate` (the exact function replay uses)
+resolves it correctly against *either* live outcome.
+
+This surfaced a real failure mode worth documenting, not just a hypothetical one:
+the first attempt at this demo had the LLM call `read_value` with
+`expected_label="Denied"` — the observed *value* — instead of `"Status:"`, the
+label. It worked anyway, by luck (the `own_text` fallback matched the value to
+itself), which is exactly how this class of bug hides right up until the outcome
+changes — replayed against an Approved page, that recording would raise
+`ReplayError` and escalate a perfectly legitimate answer as if something had broken.
+Confirmed directly (`evidence/business_outcome_demo/label_robustness_proof.txt`).
+Fixed by strengthening `read_value`'s tool description to explicitly warn against
+anchoring to the value instead of the label; the next run picked the correct label
+unprompted.
+
+What this *doesn't* solve: outcomes with no stable field to read at all — e.g.
+ParaBank's transaction search, where "not found" is just an empty results table, no
+distinctive label anywhere (`evidence/replay_error_async_race/`). That still needs
+new machinery: a `business_outcome` status alongside `success`/`failure`, checked
+against a small editable per-capability pattern list (same shape as
+`MONEY_KEYWORDS`) before escalating, not instead of it — genuinely not built, unlike
+the case above.
 
 Every failure carries the step, action, expected label/tag, and — via the escalation
 record — what a human actually saw and did about it. Never a bare stack trace.
@@ -206,6 +239,11 @@ reason, screenshot, exact human actions, outcome — a full audit trail.
 checked after every click, agent- or human-driven, hard-stopping the instant the page
 navigates outside it.
 
+**Action-type allowlist** is structural rather than a separate config: `click`,
+`type`, `read`, and `wait` are the only actions either the LLM's `computer` tool or
+replay's step executor can ever perform — there is no code path to execute anything
+else, so nothing else needs its own permission check.
+
 **Money-movement gate**, two layers: if the goal never authorized a money-flavored
 action (checked against an editable `MONEY_KEYWORDS` list — `transfer`, `withdraw`,
 `deposit`, `pay`, `loan` — against the goal text or the candidate's label), that
@@ -230,10 +268,14 @@ pattern-classification ahead of writing anything to disk.
 
 ## 7. Cuts
 
-- **Business-outcome vs. hard-failure as a distinct status.** Two-state today; the
-  extension design is in Section 3. First thing I'd build, since the spec calls
-  conflating these "the most common design mistake here" and there's already a sized
-  plan for it.
+- **Business-outcome vs. hard-failure for outcomes with no stable field to read.**
+  The common case — a status/value that varies across legitimate outcomes — is
+  solved and proven (`read_value` anchored to a stable label; Section 3,
+  `evidence/business_outcome_demo/`). What's still two-state (`success`/`failure`)
+  is the structural case, where the alternate outcome is an *absence* with no label
+  to key on at all (an empty results table, not a "not found" message) — the
+  `business_outcome` status + pattern-list design in Section 3 covers this
+  remaining gap specifically.
 - **General parameterization beyond secrets** (e.g. a typed member ID). Deferred
   because it requires the discovery LLM to distinguish "per-invocation parameter" from
   "fixed to this recording" — a real design problem, not a small addition.
@@ -254,6 +296,7 @@ pattern-classification ahead of writing anything to disk.
   building balance-reading, accepted as a real limitation of a strictly geometry-only,
   DOM-structure-blind approach.
 
-**Next, in order:** the business-outcome/failure split; general parameterization (the
-clearest limiter on artifact reusability); a second real tenant-variant target, to
-demonstrate cross-tenant reuse rather than only design it.
+**Next, in order:** the structural business-outcome case (absence, not just a
+varying value); general parameterization (the clearest limiter on artifact
+reusability); a second real tenant-variant target, to demonstrate cross-tenant
+reuse rather than only design it.

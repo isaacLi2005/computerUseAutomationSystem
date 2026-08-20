@@ -247,12 +247,22 @@ class DiscoverySession:
         self.page.keyboard.type(text)
         self.record_step("type", frame_index, local_candidate_id, value=text)
 
+    # Playwright expects DOM KeyboardEvent.key names (ArrowDown, not Down) --
+    # models don't reliably know that convention, so alias the common ones
+    # rather than crashing on an otherwise-clear intent.
+    KEY_ALIASES = {"Up": "ArrowUp", "Down": "ArrowDown", "Left": "ArrowLeft", "Right": "ArrowRight"}
+
     def handle_key(self, key_text):
         # Key presses (Enter, Tab, etc.) aren't tied to a specific click point
         # or a text value the way clicks/typing are, so we don't require a
         # candidate match for them -- just execute and let the model observe
-        # the result on the next screenshot.
-        self.page.keyboard.press(key_text)
+        # the result on the next screenshot. Some models send a
+        # space-separated sequence ("Down Down Down") to mean "press this
+        # several times" -- Playwright's press() only understands one key
+        # (or a "+"-combo) per call, so split and press each in turn rather
+        # than crashing on an unrecognized combined key name.
+        for key in key_text.split():
+            self.page.keyboard.press(self.KEY_ALIASES.get(key, key))
         print(f"  pressed key: {key_text}")
 
     def handle_checkpoint(self, expected_label, reason):
@@ -336,11 +346,18 @@ TOOLS = [
         "name": "read_value",
         "description": (
             "Reads and reports the current value of a piece of page content -- e.g. an "
-            "account balance -- so it can be returned to whoever asked for it. Only use "
-            "a label copied EXACTLY from a candidate list line whose tag is \"text\" -- "
-            "never a value you read visually or remember. E.g. if the list shows: "
-            "14. text -- \"Balance\": '$1,234.56', pass exactly Balance as expected_label "
-            "-- the actual value is looked up deterministically, not typed in by you."
+            "account balance, or a status like Approved/Denied -- so it can be returned "
+            "to whoever asked for it. Only use a label copied EXACTLY from a candidate "
+            "list line whose tag is \"text\" -- never a value you read visually or "
+            "remember. E.g. if the list shows: 14. text -- \"Balance\": '$1,234.56', "
+            "pass exactly Balance as expected_label -- the actual value is looked up "
+            "deterministically, not typed in by you. IMPORTANT: pick the STABLE label "
+            "identifying the value, never the value itself, even if the value also "
+            "appears as its own candidate line -- e.g. for a line reading "
+            "\"Status\": 'Denied', pass expected_label=Status, not Denied. The value "
+            "you're reading right now (Denied) may be different next time (Approved) "
+            "-- if you use it as the label, re-reading it later will fail to find "
+            "anything, since that exact value candidate will no longer exist."
         ),
         "input_schema": {
             "type": "object",
