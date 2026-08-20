@@ -285,6 +285,15 @@ class DiscoverySession:
         print(f"  checkpoint held: \"{expected_label}\" ({reason})")
 
 
+def tool_result(block_id, content, is_error=False):
+    """Builds one tool_result block -- the shape Anthropic's API expects
+    back for every tool_use, regardless of which tool it was."""
+    result = {"type": "tool_result", "tool_use_id": block_id, "content": content}
+    if is_error:
+        result["is_error"] = True
+    return result
+
+
 def escalate(session, reason):
     """Runs the shared human-escalation loop (escalation.run_escalation) on
     this session's live page, records what happened, and returns the
@@ -485,31 +494,21 @@ def run_turns(session, system_prompt):
                     if outcome == "skip":
                         done = True  # the human couldn't unstick it either
                     else:
-                        tool_results.append({
-                            "type": "tool_result",
-                            "tool_use_id": block.id,
-                            "content": [
-                                {"type": "text", "text": "A human intervened. Here is the "
-                                                          "current state -- continue toward the goal."},
-                                *session.observation_blocks(),
-                            ],
-                        })
+                        tool_results.append(tool_result(block.id, [
+                            {"type": "text", "text": "A human intervened. Here is the "
+                                                      "current state -- continue toward the goal."},
+                            *session.observation_blocks(),
+                        ]))
 
             elif block.type == "tool_use" and block.name == "read_value":
                 value = session.handle_read(block.input["expected_label"], block.input["output_key"], block.input["reason"])
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": f"Recorded. Current value of \"{block.input['expected_label']}\" is {value!r}.",
-                })
+                tool_results.append(tool_result(
+                    block.id, f"Recorded. Current value of \"{block.input['expected_label']}\" is {value!r}."
+                ))
 
             elif block.type == "tool_use" and block.name == "declare_checkpoint":
                 session.handle_checkpoint(block.input["expected_label"], block.input["reason"])
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": "Checkpoint recorded.",
-                })
+                tool_results.append(tool_result(block.id, "Checkpoint recorded."))
 
             elif block.type == "tool_use" and block.name == "computer":
                 action = block.input.get("action")
@@ -531,19 +530,12 @@ def run_turns(session, system_prompt):
                     # Recorded (see handle_wait) so replay waits too.
                     session.handle_wait(block.input.get("duration", 1))
                 else:
-                    tool_results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": f"Action '{action}' isn't implemented.",
-                        "is_error": True,
-                    })
+                    tool_results.append(tool_result(
+                        block.id, f"Action '{action}' isn't implemented.", is_error=True
+                    ))
                     continue
 
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": block.id,
-                    "content": session.observation_blocks(),
-                })
+                tool_results.append(tool_result(block.id, session.observation_blocks()))
 
         if done:
             turns_exhausted = False
